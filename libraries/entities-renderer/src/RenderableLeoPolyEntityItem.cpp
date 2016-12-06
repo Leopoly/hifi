@@ -40,13 +40,14 @@
 #include "RenderableLeoPolyEntityItem.h"
 #include "EntityEditPacketSender.h"
 #include "PhysicalEntitySimulation.h"
-#include <curl/curl.h>
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
 #ifdef WIN32
 #include <io.h>
+#include <curl/curl.h>
 #else
 #include <unistd.h>
 #endif
@@ -65,6 +66,7 @@
 
 gpu::PipelinePointer RenderableLeoPolyEntityItem::_pipeline = nullptr;
 
+#ifdef WIN32
 /* NOTE: if you want this example to work on Windows with libcurl as a
 DLL, you MUST also provide a read callback with CURLOPT_READFUNCTION.
 Failing to do so will give you a crash since a DLL may not use the
@@ -81,7 +83,7 @@ static size_t read_callback(void *ptr, size_t size, size_t nmemb, void *stream)
         " bytes from file\n", nread);
     return retcode;
 }
-
+#endif
 EntityItemPointer RenderableLeoPolyEntityItem::factory(const EntityItemID& entityID, const EntityItemProperties& properties) {
     EntityItemPointer entity{ new RenderableLeoPolyEntityItem(entityID) };
     entity->setProperties(properties);
@@ -912,6 +914,7 @@ model::Box RenderableLeoPolyEntityItem::evalMeshBound(const model::MeshPointer m
 
 bool RenderableLeoPolyEntityItem::doUploadViaFTP(std::string fileName)
 {
+#ifdef WIN32
     CURL *curl;
     CURLcode res;
     FILE *hd_src;
@@ -980,5 +983,6 @@ bool RenderableLeoPolyEntityItem::doUploadViaFTP(std::string fileName)
 
     delete url;
     delete usernameAndPassword;
+#endif
     return true;
 }
