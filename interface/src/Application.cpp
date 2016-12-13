@@ -2179,7 +2179,7 @@ void Application::perFrameUpdateLeoEngine()const
             _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::LS_X),
             _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::LS_Y),
             dArray);
-        EntityItemID entityUnderSculptID;
+        /*EntityItemID entityUnderSculptID;
 
         entityUnderSculptID.data1 = LeoPolyPlugin::Instance().CurrentlyUnderEdit.data1;
         entityUnderSculptID.data2 = LeoPolyPlugin::Instance().CurrentlyUnderEdit.data2;
@@ -2202,7 +2202,7 @@ void Application::perFrameUpdateLeoEngine()const
                 edited->setLastBroadcast(usecTimestampNow());
             }
         });
-
+        */
 
 
 
