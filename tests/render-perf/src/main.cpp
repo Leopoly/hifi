@@ -38,6 +38,7 @@
 #include <shared/NetworkUtils.h>
 #include <shared/FileLogger.h>
 #include <shared/FileUtils.h>
+#include <StatTracker.h>
 #include <LogHandler.h>
 #include <AssetClient.h>
 
@@ -70,6 +71,8 @@
 
 #include "Camera.hpp"
 
+Q_DECLARE_LOGGING_CATEGORY(renderperflogging)
+Q_LOGGING_CATEGORY(renderperflogging, "hifi.render_perf")
 
 static const QString LAST_SCENE_KEY = "lastSceneFile";
 static const QString LAST_LOCATION_KEY = "lastLocation";
@@ -473,6 +476,8 @@ public:
         DependencyManager::registerInheritance<EntityActionFactoryInterface, TestActionFactory>();
         DependencyManager::registerInheritance<LimitedNodeList, NodeList>();
         DependencyManager::registerInheritance<SpatialParentFinder, ParentFinder>();
+        DependencyManager::set<tracing::Tracer>();
+        DependencyManager::set<StatTracker>();
         DependencyManager::set<AddressManager>();
         DependencyManager::set<NodeList>(NodeType::Agent);
         DependencyManager::set<DeferredLightingEffect>();
@@ -541,7 +546,7 @@ public:
         restorePosition();
 
         QTimer* timer = new QTimer(this);
-        timer->setInterval(0);
+        timer->setInterval(0); // Qt::CoarseTimer acceptable
         connect(timer, &QTimer::timeout, this, [this] {
             draw();
         });
@@ -856,7 +861,6 @@ private:
         EntityUpdateOperator updateOperator(now);
         //getEntities()->getTree()->recurseTreeWithOperator(&updateOperator);
         {
-            PROFILE_RANGE_EX("PreRenderLambdas", 0xffff0000, (uint64_t)0);
             for (auto& iter : _postUpdateLambdas) {
                 iter.second();
             }
@@ -899,7 +903,7 @@ private:
         gpu::doInBatch(gpuContext, [&](gpu::Batch& batch) {
             batch.resetStages();
         });
-        PROFILE_RANGE(__FUNCTION__);
+        PROFILE_RANGE(render, __FUNCTION__);
         PerformanceTimer perfTimer("draw");
         // The pending changes collecting the changes here
         render::PendingChanges pendingChanges;
@@ -1086,7 +1090,7 @@ private:
     QSize _size;
     QSettings _settings;
 
-    std::atomic<size_t> _renderCount;
+    std::atomic<size_t> _renderCount{ 0 };
     gl::OffscreenContext _initContext;
     RenderThread _renderThread;
     QWindowCamera _camera;
@@ -1152,3 +1156,4 @@ int main(int argc, char** argv) {
 }
 
 #include "main.moc"
+

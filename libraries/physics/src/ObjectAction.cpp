@@ -1,6 +1,6 @@
 //
 //  ObjectAction.cpp
-//  libraries/physics/src
+//  libraries/physcis/src
 //
 //  Created by Seth Alves 2015-6-2
 //  Copyright 2015 High Fidelity, Inc.
@@ -12,6 +12,9 @@
 #include "EntitySimulation.h"
 
 #include "ObjectAction.h"
+
+#include "PhysicsLogging.h"
+
 
 ObjectAction::ObjectAction(EntityActionType type, const QUuid& id, EntityItemPointer ownerEntity) :
     btActionInterface(),
@@ -32,7 +35,7 @@ void ObjectAction::updateAction(btCollisionWorld* collisionWorld, btScalar delta
     });
 
     if (!ownerEntity) {
-        qDebug() << "warning -- action with no entity removing self from btCollisionWorld.";
+        qCDebug(physics) << "warning -- action with no entity removing self from btCollisionWorld.";
         btDynamicsWorld* dynamicsWorld = static_cast<btDynamicsWorld*>(collisionWorld);
         if (dynamicsWorld) {
             dynamicsWorld->removeAction(this);
@@ -242,7 +245,7 @@ void ObjectAction::activateBody(bool forceActivation) {
     if (rigidBody) {
         rigidBody->activate(forceActivation);
     } else {
-        qDebug() << "ObjectAction::activateBody -- no rigid body" << (void*)rigidBody;
+        qCDebug(physics) << "ObjectAction::activateBody -- no rigid body" << (void*)rigidBody;
     }
 }
 

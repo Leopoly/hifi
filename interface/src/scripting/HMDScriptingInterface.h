@@ -25,7 +25,7 @@ class QScriptEngine;
 
 class HMDScriptingInterface : public AbstractHMDScriptingInterface, public Dependency {
     Q_OBJECT
-    Q_PROPERTY(glm::vec3 position READ getPosition WRITE setPosition)
+    Q_PROPERTY(glm::vec3 position READ getPosition)
     Q_PROPERTY(glm::quat orientation READ getOrientation)
     Q_PROPERTY(bool mounted READ isMounted)
 
@@ -38,8 +38,9 @@ public:
     Q_INVOKABLE QString preferredAudioInput() const;
     Q_INVOKABLE QString preferredAudioOutput() const;
 
-    Q_INVOKABLE bool isHMDAvailable();
-    Q_INVOKABLE bool isHandControllerAvailable();
+    Q_INVOKABLE bool isHMDAvailable(const QString& name = "");
+    Q_INVOKABLE bool isHandControllerAvailable(const QString& name = "");
+    Q_INVOKABLE bool isSubdeviceContainingNameAvailable(const QString& name);
 
     Q_INVOKABLE void requestShowHandControllers();
     Q_INVOKABLE void requestHideHandControllers();
@@ -56,7 +57,7 @@ public:
     /// not be interrupted by a keyboard popup
     /// Returns false if there is already an active keyboard displayed.
     /// Clients should re-enable the keyboard when the operation is complete and ensure
-    /// that they balance any call to suppressKeyboard() that returns true with a corresponding
+    /// that they balance any call to suppressKeyboard() that returns true with a corresponding 
     /// call to unsuppressKeyboard() within a reasonable amount of time
     Q_INVOKABLE bool suppressKeyboard();
 
@@ -68,9 +69,6 @@ public:
 
     // rotate the overlay UI sphere so that it is centered about the the current HMD position and orientation
     Q_INVOKABLE void centerUI();
-
-    // snap HMD to align with Avatar's current position in world-frame
-    Q_INVOKABLE void snapToAvatar();
 
 signals:
     bool shouldShowHandControllersChanged();
@@ -85,10 +83,7 @@ public:
 private:
     // Get the position of the HMD
     glm::vec3 getPosition() const;
-
-    // Set the position of the HMD
-    Q_INVOKABLE void setPosition(const glm::vec3& position);
-
+    
     // Get the orientation of the HMD
     glm::quat getOrientation() const;
 
