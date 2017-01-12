@@ -103,6 +103,7 @@
 #include <RenderableModelEntityItem.h>
 #include <RenderableLeoPolyEntityItem.h>
 #include <RenderShadowTask.h>
+#include <render/RenderFetchCullSortTask.h>
 #include <RenderDeferredTask.h>
 #include <RenderForwardTask.h>
 #include <ResourceCache.h>
@@ -194,8 +195,9 @@ static QTimer pingTimer;
 
 static const int MAX_CONCURRENT_RESOURCE_DOWNLOADS = 16;
 
-// For processing on QThreadPool, target 2 less than the ideal number of threads, leaving
-// 2 logical cores available for time sensitive tasks.
+// For processing on QThreadPool, we target a number of threads after reserving some 
+// based on how many are being consumed by the application and the display plugin.  However,
+// we will never drop below the 'min' value
 static const int MIN_PROCESSING_THREAD_POOL_SIZE = 2;
 
 static const QString SNAPSHOT_EXTENSION  = ".jpg";
@@ -1138,6 +1140,7 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
     _settingsTimer.moveToThread(&_settingsThread);
     _settingsTimer.setSingleShot(false);
     _settingsTimer.setInterval(SAVE_SETTINGS_INTERVAL); // 10s, Qt::CoarseTimer acceptable
+    _settingsThread.setPriority(QThread::LowestPriority);
     _settingsThread.start();
 
     if (Menu::getInstance()->isOptionChecked(MenuOption::FirstPerson)) {
@@ -1821,11 +1824,13 @@ void Application::initializeGL() {
     // Set up the render engine
     render::CullFunctor cullFunctor = LODManager::shouldRender;
     _renderEngine->addJob<RenderShadowTask>("RenderShadowTask", cullFunctor);
+    const auto items = _renderEngine->addJob<RenderFetchCullSortTask>("FetchCullSort", cullFunctor);
+    assert(items.canCast<RenderFetchCullSortTask::Output>());
     static const QString RENDER_FORWARD = "HIFI_RENDER_FORWARD";
     if (QProcessEnvironment::systemEnvironment().contains(RENDER_FORWARD)) {
-        _renderEngine->addJob<RenderForwardTask>("RenderForwardTask", cullFunctor);
+        _renderEngine->addJob<RenderForwardTask>("RenderForwardTask", items.get<RenderFetchCullSortTask::Output>());
     } else {
-        _renderEngine->addJob<RenderDeferredTask>("RenderDeferredTask", cullFunctor);
+        _renderEngine->addJob<RenderDeferredTask>("RenderDeferredTask", items.get<RenderFetchCullSortTask::Output>());
     }
     _renderEngine->load();
     _renderEngine->registerScene(_main3DScene);
@@ -3385,15 +3390,15 @@ void Application::idle(float nsecsElapsed) {
         connect(offscreenUi.data(), &OffscreenUi::showDesktop, this, &Application::showDesktop);
     }
 
-    PROFILE_COUNTER(app, "fps", { { "fps", _frameCounter.rate() } });
-    PROFILE_COUNTER(app, "downloads", {
-        { "current", ResourceCache::getLoadingRequests().length() },
-        { "pending", ResourceCache::getPendingRequestCount() }
-    });
-    PROFILE_COUNTER(app, "processing", {
-        { "current", DependencyManager::get<StatTracker>()->getStat("Processing") },
-        { "pending", DependencyManager::get<StatTracker>()->getStat("PendingProcessing") }
-    });
+    auto displayPlugin = getActiveDisplayPlugin();
+    if (displayPlugin) {
+        PROFILE_COUNTER_IF_CHANGED(app, "present", float, displayPlugin->presentRate());
+    }
+    PROFILE_COUNTER_IF_CHANGED(app, "fps", float, _frameCounter.rate());
+    PROFILE_COUNTER_IF_CHANGED(app, "currentDownloads", int, ResourceCache::getLoadingRequests().length());
+    PROFILE_COUNTER_IF_CHANGED(app, "pendingDownloads", int, ResourceCache::getPendingRequestCount());
+    PROFILE_COUNTER_IF_CHANGED(app, "currentProcessing", int, DependencyManager::get<StatTracker>()->getStat("Processing").toInt());
+    PROFILE_COUNTER_IF_CHANGED(app, "pendingProcessing", int, DependencyManager::get<StatTracker>()->getStat("PendingProcessing").toInt());
 
     PROFILE_RANGE(app, __FUNCTION__);
 
@@ -6216,7 +6221,7 @@ void Application::loadScriptURLDialog() const {
 
 void Application::toggleLogDialog() {
     if (! _logDialog) {
-        _logDialog = new LogDialog(_glWidget, getLogger());
+        _logDialog = new LogDialog(nullptr, getLogger());
     }
 
     if (_logDialog->isVisible()) {
