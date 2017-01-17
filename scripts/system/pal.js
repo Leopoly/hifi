@@ -19,9 +19,13 @@ const UNSELECTED_TEXTURES = {"idle-D": Script.resolvePath("./assets/models/Avata
 const SELECTED_TEXTURES = { "idle-D": Script.resolvePath("./assets/models/Avatar-Overlay-v1.fbx/Avatar-Overlay-v1.fbm/avatar-overlay-selected.png"),
                             "idle-E": Script.resolvePath("./assets/models/Avatar-Overlay-v1.fbx/Avatar-Overlay-v1.fbm/avatar-overlay-selected.png")
 };
+const HOVER_TEXTURES = { "idle-D": Script.resolvePath("./assets/models/Avatar-Overlay-v1.fbx/Avatar-Overlay-v1.fbm/avatar-overlay-hover.png"),
+                         "idle-E": Script.resolvePath("./assets/models/Avatar-Overlay-v1.fbx/Avatar-Overlay-v1.fbm/avatar-overlay-hover.png")
+};
 
 const UNSELECTED_COLOR = { red: 0x1F, green: 0xC6, blue: 0xA6};
-const SELECTED_COLOR = {red: 0xf3, green: 0x91, blue: 0x29};
+const SELECTED_COLOR = {red: 0xF3, green: 0x91, blue: 0x29};
+const HOVER_COLOR = {red: 0xD0, green: 0xD0, blue: 0xD0}; // almost white for now
 
 (function() { // BEGIN LOCAL_SCOPE
 
@@ -46,6 +50,7 @@ function ExtendedOverlay(key, type, properties, selected, hasModel) { // A wrapp
     }
     this.key = key;
     this.selected = selected || false; // not undefined
+    this.hovering = false;
     this.activeOverlay = Overlays.addOverlay(type, properties); // We could use different overlays for (un)selected...
 }
 // Instance methods:
@@ -58,8 +63,8 @@ ExtendedOverlay.prototype.editOverlay = function (properties) { // change displa
     Overlays.editOverlay(this.activeOverlay, properties);
 };
 
-function color(selected, level) {
-    var base = selected ? SELECTED_COLOR : UNSELECTED_COLOR;
+function color(selected, hovering, level) {
+    var base = hovering ? HOVER_COLOR : selected ? SELECTED_COLOR : UNSELECTED_COLOR;
     function scale(component) {
         var delta = 0xFF - component;
         return component + (delta * level);
@@ -67,16 +72,38 @@ function color(selected, level) {
     return {red: scale(base.red), green: scale(base.green), blue: scale(base.blue)};
 }
 
-function textures(selected) {
-    return selected ? SELECTED_TEXTURES : UNSELECTED_TEXTURES;
+function textures(selected, hovering) {
+    return hovering ? HOVER_TEXTURES : selected ? SELECTED_TEXTURES : UNSELECTED_TEXTURES;
 }
-
+// so we don't have to traverse the overlays to get the last one
+var lastHoveringId = 0;
+ExtendedOverlay.prototype.hover = function (hovering) {
+    this.hovering = hovering;
+    if (this.key === lastHoveringId) {
+        if (hovering) {
+            return;
+        } else {
+            lastHoveringId = 0;
+        }
+    } 
+    this.editOverlay({color: color(this.selected, hovering, this.audioLevel)});
+    if (this.model) {
+        this.model.editOverlay({textures: textures(this.selected, hovering)});
+    }
+    if (hovering) {
+        // un-hover the last hovering overlay
+        if (lastHoveringId && lastHoveringId != this.key) {
+            ExtendedOverlay.get(lastHoveringId).hover(false);
+        }
+        lastHoveringId = this.key;
+    }
+}
 ExtendedOverlay.prototype.select = function (selected) {
     if (this.selected === selected) {
         return;
     }
     
-    this.editOverlay({color: color(selected, this.audioLevel)});
+    this.editOverlay({color: color(selected, this.hovering, this.audioLevel)});
     if (this.model) {
         this.model.editOverlay({textures: textures(selected)});
     }
@@ -98,14 +125,25 @@ ExtendedOverlay.some = function (iterator) { // Bails early as soon as iterator 
         }
     }
 };
-ExtendedOverlay.applyPickRay = function (pickRay, cb) { // cb(overlay) on the one overlay intersected by pickRay, if any.
+ExtendedOverlay.unHover = function () { // calls hover(false) on lastHoveringId (if any)
+    if (lastHoveringId) {
+        ExtendedOverlay.get(lastHoveringId).hover(false);
+    }
+};
+
+// hit(overlay) on the one overlay intersected by pickRay, if any.
+// noHit() if no ExtendedOverlay was intersected (helps with hover)
+ExtendedOverlay.applyPickRay = function (pickRay, hit, noHit) {
     var pickedOverlay = Overlays.findRayIntersection(pickRay); // Depends on nearer coverOverlays to extend closer to us than farther ones.
     if (!pickedOverlay.intersects) {
+        if (noHit) {
+            return noHit();
+        }
         return;
     }
     ExtendedOverlay.some(function (overlay) { // See if pickedOverlay is one of ours.
         if ((overlay.activeOverlay) === pickedOverlay.overlayID) {
-            cb(overlay);
+            hit(overlay);
             return true;
         }
     });
@@ -195,6 +233,10 @@ pal.fromQml.connect(function (message) { // messages are {method, params}, like 
         removeOverlays();
         populateUserList();
         break;
+    case 'updateGain':
+        data = message.params;
+        Users.setAvatarGain(data['sessionId'], data['gain']);
+        break;
     default:
         print('Unrecognized message from Pal.qml:', JSON.stringify(message));
     }
@@ -209,7 +251,7 @@ function addAvatarNode(id) {
          drawInFront: true, 
          solid: true, 
          alpha: 0.8, 
-         color: color(selected, 0.0),
+         color: color(selected, false, 0.0),
          ignoreRayIntersection: false}, selected, true);
 }
 function populateUserList() {
@@ -293,7 +335,7 @@ function updateOverlays() {
 
         overlay.ping = pingPong;
         overlay.editOverlay({
-            color: color(ExtendedOverlay.isSelected(id), overlay.audioLevel),
+            color: color(ExtendedOverlay.isSelected(id), overlay.hovering, overlay.audioLevel),
             position: target,
             dimensions: 0.032 * distance 
         });
@@ -317,6 +359,7 @@ function updateOverlays() {
 }
 function removeOverlays() {
     selectedIds = [];
+    lastHoveringId = 0;
     HighlightedEntity.clearOverlays();
     ExtendedOverlay.some(function (overlay) { overlay.deleteOverlay(); });
 }
@@ -338,9 +381,54 @@ function handleMouseEvent(mousePressEvent) { // handleClick if we get one.
     }
     handleClick(Camera.computePickRay(mousePressEvent.x, mousePressEvent.y));
 }
+function handleMouseMove(pickRay) { // given the pickRay, just do the hover logic
+    ExtendedOverlay.applyPickRay(pickRay, function (overlay) {
+        overlay.hover(true);
+    }, function () {
+        ExtendedOverlay.unHover();
+    });
+}
+
+// handy global to keep track of which hand is the mouse (if any)
+var currentHandPressed = 0;
+const TRIGGER_CLICK_THRESHOLD = 0.85;
+const TRIGGER_PRESS_THRESHOLD = 0.05;
+
+function handleMouseMoveEvent(event) { // find out which overlay (if any) is over the mouse position
+    if (HMD.active) {
+        if (currentHandPressed != 0) {
+            pickRay = controllerComputePickRay(currentHandPressed);
+        } else {
+            // nothing should hover, so
+            ExtendedOverlay.unHover();
+            return;
+        }
+    } else {
+        pickRay = Camera.computePickRay(event.x, event.y);
+    }
+    handleMouseMove(pickRay);
+}
+function handleTriggerPressed(hand, value) {
+    // The idea is if you press one trigger, it is the one 
+    // we will consider the mouse.  Even if the other is pressed,
+    // we ignore it until this one is no longer pressed.
+    isPressed = value > TRIGGER_PRESS_THRESHOLD;
+    if (currentHandPressed == 0) {
+        currentHandPressed = isPressed ? hand : 0;
+        return;
+    }
+    if (currentHandPressed == hand) { 
+        currentHandPressed = isPressed ? hand : 0;
+        return;
+    } 
+    // otherwise, the other hand is still triggered
+    // so do nothing.
+}
+
 // We get mouseMoveEvents from the handControllers, via handControllerPointer.
 // But we don't get mousePressEvents.
 var triggerMapping = Controller.newMapping(Script.resolvePath('') + '-click');
+var triggerPressMapping = Controller.newMapping(Script.resolvePath('') + '-press');
 function controllerComputePickRay(hand) {
     var controllerPose = getControllerWorldLocation(hand, true);
     if (controllerPose.valid) {
@@ -349,55 +437,21 @@ function controllerComputePickRay(hand) {
 }
 function makeClickHandler(hand) {
     return function (clicked) {
-        if (clicked > 0.85) {
+        if (clicked > TRIGGER_CLICK_THRESHOLD) {
             var pickRay = controllerComputePickRay(hand);
             handleClick(pickRay);
         }
     };
 }
+function makePressHandler(hand) {
+    return function (value) {
+        handleTriggerPressed(hand, value);
+    }
+}
 triggerMapping.from(Controller.Standard.RTClick).peek().to(makeClickHandler(Controller.Standard.RightHand));
 triggerMapping.from(Controller.Standard.LTClick).peek().to(makeClickHandler(Controller.Standard.LeftHand));
-
-//
-// Manage the connection between the button and the window.
-//
-var toolBar = Toolbars.getToolbar("com.highfidelity.interface.toolbar.system");
-var buttonName = "pal";
-var button = toolBar.addButton({
-    objectName: buttonName,
-    imageURL: Script.resolvePath("assets/images/tools/people.svg"),
-    visible: true,
-    hoverState: 2,
-    defaultState: 1,
-    buttonState: 1,
-    alpha: 0.9
-});
-var isWired = false;
-function off() {
-    if (isWired) { // It is not ok to disconnect these twice, hence guard.
-        Script.update.disconnect(updateOverlays);
-        Controller.mousePressEvent.disconnect(handleMouseEvent);
-        isWired = false;
-    }
-    triggerMapping.disable(); // It's ok if we disable twice.
-    removeOverlays();
-    Users.requestsDomainListData = false;
-}
-function onClicked() {
-    if (!pal.visible) {
-        Users.requestsDomainListData = true;
-        populateUserList();
-        pal.raise();
-        isWired = true;
-        Script.update.connect(updateOverlays);
-        Controller.mousePressEvent.connect(handleMouseEvent);
-        triggerMapping.enable();
-    } else {
-        off();
-    }
-    pal.setVisible(!pal.visible);
-}
-
+triggerPressMapping.from(Controller.Standard.RT).peek().to(makePressHandler(Controller.Standard.RightHand));
+triggerPressMapping.from(Controller.Standard.LT).peek().to(makePressHandler(Controller.Standard.LeftHand));
 //
 // Message from other scripts, such as edit.js
 //
@@ -429,6 +483,7 @@ var LOUDNESS_SCALE = 2.8 / 5.0;
 var LOG2 = Math.log(2.0);
 var AUDIO_LEVEL_UPDATE_INTERVAL_MS = 100; // 10hz for now (change this and change the AVERAGING_RATIO too)
 var myData = {}; // we're not includied in ExtendedOverlay.get.
+var audioInterval;
 
 function getAudioLevel(id) {
     // the VU meter should work similarly to the one in AvatarInputs: log scale, exponentially averaged
@@ -461,21 +516,71 @@ function getAudioLevel(id) {
     return audioLevel;
 }
 
+function createAudioInterval() {
+    // we will update the audioLevels periodically
+    // TODO: tune for efficiency - expecially with large numbers of avatars
+    return Script.setInterval(function () {
+        if (pal.visible) {
+            var param = {};
+            AvatarList.getAvatarIdentifiers().forEach(function (id) {
+                var level = getAudioLevel(id);
+                // qml didn't like an object with null/empty string for a key, so...
+                var userId = id || 0;
+                param[userId] = level;
+            });
+            pal.sendToQml({method: 'updateAudioLevel', params: param});
+        }
+    }, AUDIO_LEVEL_UPDATE_INTERVAL_MS);
+}
 
-// we will update the audioLevels periodically
-// TODO: tune for efficiency - expecially with large numbers of avatars
-Script.setInterval(function () {
-    if (pal.visible) {
-        var param = {};
-        AvatarList.getAvatarIdentifiers().forEach(function (id) {
-            var level = getAudioLevel(id);
-            // qml didn't like an object with null/empty string for a key, so...
-            var userId = id || 0;
-            param[userId] = level;
-        });
-        pal.sendToQml({method: 'updateAudioLevel', params: param});
+//
+// Manage the connection between the button and the window.
+//
+var toolBar = Toolbars.getToolbar("com.highfidelity.interface.toolbar.system");
+var buttonName = "pal";
+var button = toolBar.addButton({
+    objectName: buttonName,
+    imageURL: Script.resolvePath("assets/images/tools/people.svg"),
+    visible: true,
+    hoverState: 2,
+    defaultState: 1,
+    buttonState: 1,
+    alpha: 0.9
+});
+var isWired = false;
+function off() {
+    if (isWired) { // It is not ok to disconnect these twice, hence guard.
+        Script.update.disconnect(updateOverlays);
+        Controller.mousePressEvent.disconnect(handleMouseEvent);
+        Controller.mouseMoveEvent.disconnect(handleMouseMoveEvent);
+        isWired = false;
     }
-}, AUDIO_LEVEL_UPDATE_INTERVAL_MS);
+    triggerMapping.disable(); // It's ok if we disable twice.
+    triggerPressMapping.disable(); // see above
+    removeOverlays();
+    Users.requestsDomainListData = false;
+    if (audioInterval) {
+        Script.clearInterval(audioInterval);
+    }
+}
+function onClicked() {
+    if (!pal.visible) {
+        Users.requestsDomainListData = true;
+        populateUserList();
+        pal.raise();
+        isWired = true;
+        Script.update.connect(updateOverlays);
+        Controller.mousePressEvent.connect(handleMouseEvent);
+        Controller.mouseMoveEvent.connect(handleMouseMoveEvent);
+        triggerMapping.enable();
+        triggerPressMapping.enable();
+        createAudioInterval();
+    } else {
+        off();
+    }
+    pal.setVisible(!pal.visible);
+}
+
 //
 // Button state.
 //
@@ -488,14 +593,14 @@ button.clicked.connect(onClicked);
 pal.visibleChanged.connect(onVisibleChanged);
 pal.closed.connect(off);
 Users.usernameFromIDReply.connect(usernameFromIDReply);
-function clearIgnoredInQMLAndClosePAL() {
-    pal.sendToQml({ method: 'clearIgnored' });
+function clearLocalQMLDataAndClosePAL() {
+    pal.sendToQml({ method: 'clearLocalQMLData' });
     if (pal.visible) {
         onClicked(); // Close the PAL
     }
 }
-Window.domainChanged.connect(clearIgnoredInQMLAndClosePAL);
-Window.domainConnectionRefused.connect(clearIgnoredInQMLAndClosePAL);
+Window.domainChanged.connect(clearLocalQMLDataAndClosePAL);
+Window.domainConnectionRefused.connect(clearLocalQMLDataAndClosePAL);
 
 //
 // Cleanup.
@@ -506,8 +611,8 @@ Script.scriptEnding.connect(function () {
     pal.visibleChanged.disconnect(onVisibleChanged);
     pal.closed.disconnect(off);
     Users.usernameFromIDReply.disconnect(usernameFromIDReply);
-    Window.domainChanged.disconnect(clearIgnoredInQMLAndClosePAL);
-    Window.domainConnectionRefused.disconnect(clearIgnoredInQMLAndClosePAL);
+    Window.domainChanged.disconnect(clearLocalQMLDataAndClosePAL);
+    Window.domainConnectionRefused.disconnect(clearLocalQMLDataAndClosePAL);
     Messages.unsubscribe(CHANNEL);
     Messages.messageReceived.disconnect(receiveMessage);
     off();

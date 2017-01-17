@@ -63,8 +63,7 @@ void MeshPartPayload::updateMeshPart(const std::shared_ptr<const model::Mesh>& d
 
 void MeshPartPayload::updateTransform(const Transform& transform, const Transform& offsetTransform) {
     _transform = transform;
-    _offsetTransform = offsetTransform;
-    Transform::mult(_drawTransform, _transform, _offsetTransform);
+    Transform::mult(_drawTransform, _transform, offsetTransform);
     _worldBound = _localBound;
     _worldBound.transform(_drawTransform);
 }
@@ -360,8 +359,11 @@ void ModelMeshPartPayload::notifyLocationChanged() {
 
 }
 
-void ModelMeshPartPayload::updateTransformForSkinnedMesh(const Transform& transform, const Transform& offsetTransform, const QVector<glm::mat4>& clusterMatrices) {
-    ModelMeshPartPayload::updateTransform(transform, offsetTransform);
+void ModelMeshPartPayload::updateTransformForSkinnedMesh(const Transform& transform,
+        const QVector<glm::mat4>& clusterMatrices,
+        const QVector<glm::mat4>& cauterizedClusterMatrices) {
+    _transform = transform;
+    _cauterizedTransform = transform;
 
     if (clusterMatrices.size() > 0) {
         _worldBound = AABox();
@@ -371,8 +373,15 @@ void ModelMeshPartPayload::updateTransformForSkinnedMesh(const Transform& transf
             _worldBound += clusterBound;
         }
 
-        // clusterMatrix has world rotation but not world translation.
-        _worldBound.translate(transform.getTranslation());
+        _worldBound.transform(transform);
+        if (clusterMatrices.size() == 1) {
+            _transform = _transform.worldTransform(Transform(clusterMatrices[0]));
+            if (cauterizedClusterMatrices.size() != 0) {
+                _cauterizedTransform = _cauterizedTransform.worldTransform(Transform(cauterizedClusterMatrices[0]));
+            } else {
+                _cauterizedTransform = _transform;
+            }
+        }
     }
 }
 
@@ -520,23 +529,20 @@ void ModelMeshPartPayload::bindTransform(gpu::Batch& batch, const ShapePipeline:
     // Still relying on the raw data from the model
     const Model::MeshState& state = _model->_meshStates.at(_meshIndex);
 
-    Transform transform;
     if (state.clusterBuffer) {
         if (canCauterize && _model->getCauterizeBones()) {
             batch.setUniformBuffer(ShapePipeline::Slot::BUFFER::SKINNING, state.cauterizedClusterBuffer);
         } else {
             batch.setUniformBuffer(ShapePipeline::Slot::BUFFER::SKINNING, state.clusterBuffer);
         }
+        batch.setModelTransform(_transform);
     } else {
         if (canCauterize && _model->getCauterizeBones()) {
-            transform = Transform(state.cauterizedClusterMatrices[0]);
+            batch.setModelTransform(_cauterizedTransform);
         } else {
-            transform = Transform(state.clusterMatrices[0]);
+            batch.setModelTransform(_transform);
         }
     }
-
-    transform.preTranslate(_transform.getTranslation());
-    batch.setModelTransform(transform);
 }
 
 void ModelMeshPartPayload::startFade() {
@@ -569,8 +575,7 @@ void ModelMeshPartPayload::render(RenderArgs* args) const {
         return;
     }
 
-
-    // When an individual mesh parts like this finishes its fade, we will mark the Model as 
+    // When an individual mesh parts like this finishes its fade, we will mark the Model as
     // having render items that need updating
     bool nextIsFading = _isFading ? isStillFading() : false;
     bool startFading = !_isFading && !_hasFinishedFade && _hasStartedFade;
@@ -592,7 +597,7 @@ void ModelMeshPartPayload::render(RenderArgs* args) const {
 
     // Bind the model transform and the skinCLusterMatrices if needed
     bool canCauterize = args->_renderMode != RenderArgs::SHADOW_RENDER_MODE;
-    _model->updateClusterMatrices(_transform.getTranslation(), _transform.getRotation());
+    _model->updateClusterMatrices();
     bindTransform(batch, locations, canCauterize);
 
     //Bind the index buffer and vertex buffer and Blend shapes if needed
