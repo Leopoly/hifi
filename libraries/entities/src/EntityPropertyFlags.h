@@ -185,6 +185,8 @@ enum EntityPropertyList {
     PROP_LEOPOLY_URL,
     PROP_LEOPOLY_MODEL_VERSION,
 
+    PROP_SERVER_SCRIPTS,
+
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     // ATTENTION: add new properties to end of list just ABOVE this line
     PROP_AFTER_LAST_ITEM,

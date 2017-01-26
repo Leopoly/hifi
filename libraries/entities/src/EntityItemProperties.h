@@ -225,6 +225,8 @@ public:
     DEFINE_PROPERTY_REF(PROP_LEOPOLY_URL, LeoPolyURL, leoPolyURL, QString, LeoPolyEntityItem::DEFAULT_LEOPOLY_URL);
     DEFINE_PROPERTY_REF(PROP_LEOPOLY_MODEL_VERSION, LeoPolyModelVersion, leoPolyModelVersion, QUuid, LeoPolyEntityItem::DEFAULT_LEOPOLY_MODEL_VERSION);
 
+    DEFINE_PROPERTY_REF(PROP_SERVER_SCRIPTS, ServerScripts, serverScripts, QString, ENTITY_ITEM_DEFAULT_SERVER_SCRIPTS);
+
     static QString getBackgroundModeString(BackgroundMode mode);
 
 
