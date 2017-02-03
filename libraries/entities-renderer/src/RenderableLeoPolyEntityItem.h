@@ -20,6 +20,9 @@
 #include "LeoPolyEntityItem.h"
 #include "RenderableEntityItem.h"
 #include "gpu/Context.h"
+#include <AssetClient.h>
+#include <AssetRequest.h>
+#include <AssetUpload.h>
 
 class LeoPolyPayload {
 public:
@@ -56,7 +59,7 @@ public:
     {
         if (_modelVersion != value && getEntityItemID() != getCurrentlyEditingEntityID())
         {
-            DependencyManager::get<ModelCache>()->refresh(_leoPolyURL);
+            _modelResource.reset();
             _mesh.reset();
         }
         _modelVersion = value;
@@ -101,6 +104,13 @@ public:
     void sendToLeoEngine(ModelPointer model) override;
 
 private:
+    struct VertexStateChange
+    {
+        enum VertexStateChangeType{ Modified, Added, Deleted };
+        unsigned int index;
+        glm::vec3 newValue;
+        VertexStateChangeType type;
+    };
     struct VertexNormalTexCoord {
         glm::vec3 vertex;
         glm::vec3 normal;
@@ -118,7 +128,7 @@ private:
             return vertexFormat;
         }
     };
-
+    std::vector<VertexStateChange> getDiffFromPreviousState(QVector<glm::vec3>)const;
     void updateGeometryFromLeoPlugin();
     void createShaderPipeline();
     void importToLeoPoly();

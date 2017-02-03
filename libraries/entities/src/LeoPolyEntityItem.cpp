@@ -26,7 +26,6 @@
 const QString LeoPolyEntityItem::DEFAULT_LEOPOLY_URL = "";
 const QUuid LeoPolyEntityItem::DEFAULT_LEOPOLY_MODEL_VERSION = QUuid::createUuid();
 
-
 EntityItemPointer LeoPolyEntityItem::factory(const EntityItemID& entityID, const EntityItemProperties& properties) {
     EntityItemPointer entity { new LeoPolyEntityItem(entityID) };
     entity->setProperties(properties);
@@ -47,6 +46,10 @@ EntityItemProperties LeoPolyEntityItem::getProperties(EntityPropertyFlags desire
     COPY_ENTITY_PROPERTY_TO_PROPERTIES(leoPolyURL, getLeoPolyURL);
     COPY_ENTITY_PROPERTY_TO_PROPERTIES(leoPolyModelVersion, getLeoPolyModelVersion);
 
+    COPY_ENTITY_PROPERTY_TO_PROPERTIES(leoPolyControllerPos, getLeoPolyControllerPos);
+    COPY_ENTITY_PROPERTY_TO_PROPERTIES(leoPolyControllerRot, getLeoPolyControllerRot);
+    COPY_ENTITY_PROPERTY_TO_PROPERTIES(leoPolyTriggerState, getLeoPolyTriggerState);
+
     return properties;
 }
 
@@ -55,6 +58,9 @@ bool LeoPolyEntityItem::setProperties(const EntityItemProperties& properties) {
 
     SET_ENTITY_PROPERTY_FROM_PROPERTIES(leoPolyURL, setLeoPolyURL);
     SET_ENTITY_PROPERTY_FROM_PROPERTIES(leoPolyModelVersion, setLeoPolyModelVersion);
+    SET_ENTITY_PROPERTY_FROM_PROPERTIES(leoPolyControllerPos, setLeoPolyControllerPos);
+    SET_ENTITY_PROPERTY_FROM_PROPERTIES(leoPolyControllerRot, setLeoPolyControllerRot);
+    SET_ENTITY_PROPERTY_FROM_PROPERTIES(leoPolyTriggerState, setLeoPolyTriggerState);
 
     if (somethingChanged) {
         bool wantDebug = false;
@@ -80,6 +86,10 @@ int LeoPolyEntityItem::readEntitySubclassDataFromBuffer(const unsigned char* dat
     READ_ENTITY_PROPERTY(PROP_LEOPOLY_URL, QString, setLeoPolyURL);
     READ_ENTITY_PROPERTY(PROP_LEOPOLY_MODEL_VERSION, QUuid, setLeoPolyModelVersion);
 
+    READ_ENTITY_PROPERTY(PROP_LEOPOLY_CONTROLLER_POS, glm::vec3, setLeoPolyControllerPos);
+    READ_ENTITY_PROPERTY(PROP_LEOPOLY_CONTROLLER_ROT, glm::quat, setLeoPolyControllerRot);
+    READ_ENTITY_PROPERTY(PROP_LEOPOLY_TRIGGER_STATE, float, setLeoPolyTriggerState);
+
     return bytesRead;
 }
 
@@ -89,11 +99,14 @@ EntityPropertyFlags LeoPolyEntityItem::getEntityProperties(EncodeBitstreamParams
     EntityPropertyFlags requestedProperties = EntityItem::getEntityProperties(params);
     requestedProperties += PROP_LEOPOLY_URL;
     requestedProperties += PROP_LEOPOLY_MODEL_VERSION;
+    requestedProperties += PROP_LEOPOLY_CONTROLLER_POS;
+    requestedProperties += PROP_LEOPOLY_CONTROLLER_ROT;
+    requestedProperties += PROP_LEOPOLY_TRIGGER_STATE;
     return requestedProperties;
 }
 
 void LeoPolyEntityItem::appendSubclassData(OctreePacketData* packetData, EncodeBitstreamParams& params,
-                                           EntityTreeElementExtraEncodeData* modelTreeElementExtraEncodeData,
+                                           EntityTreeElementExtraEncodeDataPointer modelTreeElementExtraEncodeData,
                                            EntityPropertyFlags& requestedProperties,
                                            EntityPropertyFlags& propertyFlags,
                                            EntityPropertyFlags& propertiesDidntFit,
@@ -102,6 +115,10 @@ void LeoPolyEntityItem::appendSubclassData(OctreePacketData* packetData, EncodeB
     bool successPropertyFits = true;
     APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_URL, getLeoPolyURL());
     APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_MODEL_VERSION, getLeoPolyModelVersion());
+
+    APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_CONTROLLER_POS, getLeoPolyControllerPos());
+    APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_CONTROLLER_ROT, getLeoPolyControllerRot());
+    APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_TRIGGER_STATE, getLeoPolyTriggerState());
 
 }
 
@@ -113,4 +130,7 @@ void LeoPolyEntityItem::debugDump() const {
     qCDebug(entities) << "       getLastEdited:" << debugTime(getLastEdited(), now);
     qCDebug(entities) << "    leoPoly URL:" << getLeoPolyURL();
     qCDebug(entities) << "    leoPoly model version:" << getLeoPolyModelVersion();
+    qCDebug(entities) << "    leoPoly Controller pos:" << getLeoPolyControllerPos();
+    qCDebug(entities) << "    leoPoly Controller pos:" << getLeoPolyControllerRot();
+    qCDebug(entities) << "    leoPoly trigger state:" << getLeoPolyTriggerState();
 }

@@ -226,6 +226,9 @@ public:
     DEFINE_PROPERTY_REF(PROP_LEOPOLY_MODEL_VERSION, LeoPolyModelVersion, leoPolyModelVersion, QUuid, LeoPolyEntityItem::DEFAULT_LEOPOLY_MODEL_VERSION);
 
     DEFINE_PROPERTY_REF(PROP_SERVER_SCRIPTS, ServerScripts, serverScripts, QString, ENTITY_ITEM_DEFAULT_SERVER_SCRIPTS);
+    DEFINE_PROPERTY_REF(PROP_LEOPOLY_CONTROLLER_POS, LeoPolyControllerPos, leoPolyControllerPos, glm::vec3, glm::vec3());
+    DEFINE_PROPERTY_REF(PROP_LEOPOLY_CONTROLLER_ROT, LeoPolyControllerRot, leoPolyControllerRot, glm::quat, glm::quat());
+    DEFINE_PROPERTY_REF(PROP_LEOPOLY_TRIGGER_STATE, LeoPolyTriggerState, leoPolyTriggerState, float, 0.0f);
 
     static QString getBackgroundModeString(BackgroundMode mode);
 

@@ -1518,6 +1518,9 @@ void EntityScriptingInterface::sculptEntity(QUuid id)
                 props.setRotation(entity->getRotation());
                 props.setType(EntityTypes::LeoPoly);
                 props.setCreated(secTimestampNow()); 
+                auto nodeList = DependencyManager::get<NodeList>();
+                const QUuid myNodeID = nodeList->getSessionUUID();
+                props.setOwningAvatarID(myNodeID);
                 std::string fileName = entity->getID().toString().toStdString();
                 char chars[] = "{}-";
 

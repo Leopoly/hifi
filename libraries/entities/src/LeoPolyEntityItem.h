@@ -25,8 +25,8 @@ class LeoPolyEntityItem : public EntityItem {
 
     ALLOW_INSTANTIATION // This class can be instantiated
 
-    virtual void setLeoPolyURL(QString leoPolyURL) { _leoPolyURL = leoPolyURL; }
-    QString getLeoPolyURL() const { return _leoPolyURL; }
+        virtual void setLeoPolyURL(QString leoPolyURL) { _leoPolyURL = leoPolyURL; }
+    QString getLeoPolyURL() const {  return _leoPolyURL; }
 
     virtual void setLeoPolyModelVersion(QUuid value) { _modelVersion = value; /*if (_needReload)update(usecTimestampNow());TEMPORARY DISABLED*/ }
     QUuid getLeoPolyModelVersion() const 
@@ -36,6 +36,15 @@ class LeoPolyEntityItem : public EntityItem {
         return QUuid();
     }
 
+    virtual void setLeoPolyControllerPos(glm::vec3 pos){ _leoPolyControllerPos = pos; }
+    glm::vec3 getLeoPolyControllerPos()const{ return _leoPolyControllerPos; }
+
+    virtual void setLeoPolyControllerRot(glm::quat rot){ _leoPolyControllerRot = rot; }
+    glm::quat getLeoPolyControllerRot()const{ return _leoPolyControllerRot; }
+
+    virtual void setLeoPolyTriggerState(float value){ _leoPolyTriggerState = value; }
+    float getLeoPolyTriggerState()const{ return _leoPolyTriggerState; }
+
     // methods for getting/setting all properties of an entity
     virtual EntityItemProperties getProperties(EntityPropertyFlags desiredProperties = EntityPropertyFlags()) const override;
     virtual bool setProperties(const EntityItemProperties& properties) override;
@@ -44,7 +53,7 @@ class LeoPolyEntityItem : public EntityItem {
     virtual EntityPropertyFlags getEntityProperties(EncodeBitstreamParams& params) const override;
 
     virtual void appendSubclassData(OctreePacketData* packetData, EncodeBitstreamParams& params,
-                                    EntityTreeElementExtraEncodeData* modelTreeElementExtraEncodeData,
+                                    EntityTreeElementExtraEncodeDataPointer modelTreeElementExtraEncodeData,
                                     EntityPropertyFlags& requestedProperties,
                                     EntityPropertyFlags& propertyFlags,
                                     EntityPropertyFlags& propertiesDidntFit,
@@ -77,6 +86,9 @@ class LeoPolyEntityItem : public EntityItem {
 
     QString _leoPolyURL;
     QUuid _modelVersion;
+    glm::vec3 _leoPolyControllerPos;
+    glm::quat _leoPolyControllerRot;
+    float _leoPolyTriggerState;
 };
 
 #endif // hifi_LeoPolyEntityItem_h

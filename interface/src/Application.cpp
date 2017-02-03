@@ -2325,7 +2325,7 @@ void Application::perFrameUpdateLeoEngine()const
             _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::LS_X),
             _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::LS_Y),
             dArray);
-        /*EntityItemID entityUnderSculptID;
+        EntityItemID entityUnderSculptID;
 
         entityUnderSculptID.data1 = LeoPolyPlugin::Instance().CurrentlyUnderEdit.data1;
         entityUnderSculptID.data2 = LeoPolyPlugin::Instance().CurrentlyUnderEdit.data2;
@@ -2334,25 +2334,104 @@ void Application::perFrameUpdateLeoEngine()const
             entityUnderSculptID.data4[i] = LeoPolyPlugin::Instance().CurrentlyUnderEdit.data4[i];
 
         auto tree = getEntities()->getTree();
+        static bool idle = true;
+        auto uploadComplete = [=](AssetUpload* upload, const QString& hash) mutable
+        {
+            if (upload->getError() != AssetUpload::NoError)
+            {
+                QString errorInfo = "Could not upload asset to the Asset Server.";
+                qWarning(interfaceapp) << "Error downloading asset: " + errorInfo;
+            }
+            else
+            {
+                /*edited->setLeoPolyURL("atp:" + hash);
+                edited->setLeoPolyModelVersion(QUuid::createUuid());*/
+                tree->withWriteLock([&]
+                {
+                    RenderableLeoPolyEntityItem* edited = (RenderableLeoPolyEntityItem*)tree->findByID(entityUnderSculptID).get();
+                    auto sender = qApp->getEntityEditPacketSender();
+                    auto props = edited->getProperties();
+                    props.setLeoPolyURL("atp:/" + hash);
+                    props.setLeoPolyModelVersion(QUuid::createUuid());
+                    edited->setLastBroadcast(usecTimestampNow());
+                    sender->queueEditEntityMessage(PacketType::EntityEdit, tree, edited->getID(), props);
+                });
+
+            }
+            idle = true;
+        };
 
         tree->withWriteLock([&]
         {
             RenderableLeoPolyEntityItem* edited = (RenderableLeoPolyEntityItem*)tree->findByID(entityUnderSculptID).get();
-            if (edited && edited->getLastBroadcast() + 2000000<usecTimestampNow())
+            bool isServing = false;
+            auto nodeList = DependencyManager::get<NodeList>();
+            const QUuid myNodeID = nodeList->getSessionUUID();
+            if (edited && myNodeID == edited->getOwningAvatarID())
             {
-
+                isServing = true;
+            }
+            //Keyframe send
+            
+            if (idle && edited && edited->getLastBroadcast() + 2000000 < usecTimestampNow() && isServing)
+            {
                 edited->doExportCurrentState();
-                edited->setLeoPolyModelVersion(QUuid::createUuid());
-                auto sender = qApp->getEntityEditPacketSender();
-                sender->queueEditEntityMessage(PacketType::EntityEdit, tree, edited->getID(), edited->getProperties());
-                edited->setLastBroadcast(usecTimestampNow());
+                std::string uploadPath = "Temp\\";//TODO: Will be replaced
+                std::string urlPath = edited->getLeoPolyURL().toStdString();
+                const size_t last_slash_idx = urlPath.find_last_of("\\/");
+                if (std::string::npos != last_slash_idx)
+                {
+                    urlPath.erase(0, last_slash_idx + 1);
+                }
+                if (std::string::npos != urlPath.find("atp:/"))
+                {
+                    urlPath.erase(0, 5);
+                }
+                if (std::string::npos == urlPath.find(".obj"))
+                {
+                    urlPath = urlPath + ".obj";
+                }
+                // use an asset client to upload the asset
+                auto assetClient = DependencyManager::get<AssetClient>();
+
+                auto upload = assetClient->createUpload(QString((uploadPath + urlPath).c_str()));
+
+                //qCDebug(asset_migrator) << "Starting upload of asset from" << filePath;
+
+                // connect to the finished signal so we know when the AssetUpload is done
+                QObject::connect(upload, &AssetUpload::finished, this, uploadComplete);
+                idle = false;
+                // start the upload now
+                upload->start();
+
+            }
+            else
+            {
+                if (isServing && edited->getLastBroadcast() + 20000 < usecTimestampNow())
+                {
+                    auto sender = qApp->getEntityEditPacketSender();
+                    auto props = edited->getProperties();
+                    props.setLeoPolyControllerPos(rightHandPose.getTranslation());
+                    props.setLeoPolyControllerRot(rightHandPose.getRotation());
+                    
+                    props.setLeoPolyTriggerState(_controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::RT_CLICK));
+                    sender->queueEditEntityMessage(PacketType::EntityEdit, tree, edited->getID(), props);
+                }
+            }
+            if (!isServing && edited && edited->getLeoPolyTriggerState() == 1)
+            {
+                double buttons[] = { edited->getLeoPolyTriggerState(), 0, 0, 0 };
+                double dArray[16] = { 0.0 };
+                glm::mat4 rightHandMat = glm::transpose(Transform(edited->getLeoPolyControllerRot(), Transform::Vec3(1, 1, 1), edited->getLeoPolyControllerPos()).getMatrix());
+                const float *pSource = const_cast<float*>(glm::value_ptr(rightHandMat));
+                memcpy(dArray, pSource, 16*sizeof(float));
+
+                LeoPolyPlugin::Instance().setControllerStatesInput(0, 0, buttons,
+                    _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::RS_X),
+                    _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::RS_Y), dArray);
+
             }
         });
-        */
-
-
-
-
 
     }
 

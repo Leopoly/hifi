@@ -14,7 +14,7 @@
 #include <QByteArray>
 #include <QtConcurrent/QtConcurrentRun>
 #include <glm/gtx/transform.hpp>
-
+#include <OBJReader.h>
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdouble-promotion"
@@ -40,6 +40,7 @@
 #include "RenderableLeoPolyEntityItem.h"
 #include "EntityEditPacketSender.h"
 #include "PhysicalEntitySimulation.h"
+#include <AssetScriptingInterface.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -51,6 +52,7 @@
 #else
 #include <unistd.h>
 #endif
+#include <qfileinfo.h>
 
 // Plugin.h(85) : warning C4091 : '__declspec(dllimport)' : ignored on left of 'LeoPlugin' when no variable is declared
 #ifdef Q_OS_WIN
@@ -183,7 +185,7 @@ void RenderableLeoPolyEntityItem::render(RenderArgs* args) {
     Q_ASSERT(args->_batch);
 
     // if we don't have a _modelResource yet, then we can't render...
-    if (!_modelResource) 
+    if (_modelResource==nullptr) 
     {
         initializeModelResource();
         return;
@@ -318,7 +320,48 @@ void RenderableLeoPolyEntityItem::initializeModelResource() {
     // 
     if (!_leoPolyURL.isEmpty())
     {
-        _modelResource = DependencyManager::get<ModelCache>()->getGeometryResource(_leoPolyURL);
+        auto modelCache = DependencyManager::get<ModelCache>();
+        EntityItemID entityUnderSculptID = getCurrentlyEditingEntityID();
+        if (getEntityItemID() == entityUnderSculptID)
+        {
+            _modelResource = modelCache->getGeometryResource(_leoPolyURL);
+            return;
+        }
+        // use an asset client to upload the asset
+        auto assetClient = DependencyManager::get<AssetClient>();
+        auto urlPath = _leoPolyURL.toStdString();
+        if (std::string::npos != urlPath.find("atp:/"))
+        {
+            urlPath.erase(0, 5);
+        }
+        static bool isIdle = true;
+        auto assetRequest=assetClient->createRequest(QString(urlPath.c_str()));
+        assetRequest->connect(assetRequest, &AssetRequest::finished, assetClient.data(), [=](AssetRequest* request) mutable {
+            Q_ASSERT(request->getState() == AssetRequest::Finished);
+
+            if (request->getError() == AssetRequest::Error::NoError) 
+            {
+                auto data=request->getData();
+                
+                QFile file("Temp\\" + QString(urlPath.c_str())+".obj");
+                file.open(QFile::WriteOnly | QFile::Truncate);
+                file.write(data);
+                file.close();
+                _modelResource = modelCache->getGeometryResource(QFileInfo(file.fileName()).absoluteFilePath());
+            }
+            else
+            {
+                _modelResource = modelCache->getGeometryResource(_leoPolyURL);
+            }
+            request->deleteLater();
+            isIdle = true;
+        });
+        if (isIdle)
+        {
+            assetRequest->start();
+            isIdle = false;
+        }
+       
     }
 }
 
@@ -365,7 +408,14 @@ void RenderableLeoPolyEntityItem::getMesh() {
         // model not yet loaded... can't make a mesh from it yet...
         return;
     }
+    LeoPolyPlugin::Instance().CurrentlyUnderEdit.data1 =getID().data1;
+    LeoPolyPlugin::Instance().CurrentlyUnderEdit.data2 = getID().data2;
+    LeoPolyPlugin::Instance().CurrentlyUnderEdit.data3 = getID().data3;
+    LeoPolyPlugin::Instance().CurrentlyUnderEdit.data4 = new unsigned char[8];
+    memcpy(LeoPolyPlugin::Instance().CurrentlyUnderEdit.data4, getID().data4, 8 * sizeof(unsigned char));
 
+    importToLeoPoly();
+    return;
     //  const GeometryMeshes& getMeshes() const { return *_meshes; }
     auto meshes = _modelResource->getMeshes();
 
@@ -456,13 +506,21 @@ void RenderableLeoPolyEntityItem::doExportCurrentState()
     {
         urlPath.erase(0, last_slash_idx + 1);
     }
+    if (std::string::npos != urlPath.find("atp:/"))
+    {
+        urlPath.erase(0, 5);
+    }
+    if (std::string::npos == urlPath.find(".obj"))
+    {
+        urlPath = urlPath + ".obj";
+    }
     LeoPolyPlugin::Instance().SculptApp_exportFile((uploadPath + urlPath).c_str());
 
     while (LeoPolyPlugin::Instance().getAppState() == LeoPlugin::SculptApp_AppState::APPSTATE_WAIT)
     {
         LeoPolyPlugin::Instance().SculptApp_Frame();
     }
-    doUploadViaFTP(urlPath);
+   // doUploadViaATP(urlPath);
 }
 
 // This will take the _modelResource and convert it into a "flattened form" that can be used by the LeoPoly DLL
@@ -665,15 +723,34 @@ void RenderableLeoPolyEntityItem::updateGeometryFromLeoPlugin() {
     // bool needsMaterialLibrary = false;
 
     std::vector<VertexNormalTexCoord> verticesNormalsMaterials;
-
+    QVector<glm::vec3> verticesss;
     for (unsigned int i = 0; i < numVertices; i++)
     {
         glm::vec3 actVert = glm::vec3(vertices[i * 3], vertices[i * 3 + 1], vertices[i * 3 + 2]);
         glm::vec3 actNorm = glm::vec3(normals[i * 3], normals[i * 3 + 1], normals[i * 3 + 2]);
         glm::vec2 actTexCoord = glm::vec2(texCoords[i * 2], texCoords[i * 2 + 1]);
         verticesNormalsMaterials.push_back(VertexNormalTexCoord{ actVert, actNorm, actTexCoord });
+        verticesss.push_back(actVert);
     }
+    auto diffs = getDiffFromPreviousState(verticesss);
+    if (diffs.size() > 0)
+    {
+#ifdef ONE_DIFF_FILE
+        QFile file("Temp\\" + QString("diff.txt"));
+#else
+        static int number = 0;
+        QFile file("Temp\\" + QString(std::to_string(number).c_str()) + QString("diff.txt"));
+        number++;
+#endif
+        file.open(QFile::WriteOnly);
+        for (auto it : diffs)
+        {
+            file.write(("Index: "+std::to_string(it.index) + " Type: " + std::to_string(it.type)).c_str());
+            file.write((" X: " + std::to_string(it.newValue.x) + " Y: " + std::to_string(it.newValue.y) + " Z: " + std::to_string(it.newValue.z)+"\n").c_str());
+        }
+        file.close();
 
+    }
     auto vertexBuffer = std::make_shared<gpu::Buffer>(verticesNormalsMaterials.size() * sizeof(VertexNormalTexCoord),
                                                         (gpu::Byte*)verticesNormalsMaterials.data());
     auto vertexBufferPtr = gpu::BufferPointer(vertexBuffer);
@@ -725,7 +802,6 @@ void RenderableLeoPolyEntityItem::updateGeometryFromLeoPlugin() {
             
             if (meshBoundsnew.getScale() != meshBounds.getScale())
             {
-                qDebug() << "Modified dimensions: X:" << meshBoundsnew.getScale().x << " Y:" << meshBoundsnew.getScale().y << "  Z:" << meshBoundsnew.getScale().z;
                 properties.setLastEdited(usecTimestampNow()); // we must set the edit time since we're editing it
                 properties.setDimensions(properties.getDimensions()*(meshBoundsnew.getScale() / meshBounds.getScale()));
                 QMetaObject::invokeMethod(DependencyManager::get<EntityScriptingInterface>().data(), "editEntity",
@@ -910,6 +986,50 @@ model::Box RenderableLeoPolyEntityItem::evalMeshBound(const model::MeshPointer m
         }
     }
     return meshBounds;
+}
+
+std::vector<RenderableLeoPolyEntityItem::VertexStateChange> RenderableLeoPolyEntityItem::getDiffFromPreviousState(QVector<glm::vec3> newVerts)const
+{
+    std::vector<RenderableLeoPolyEntityItem::VertexStateChange> diffs;
+   
+    withWriteLock([&] {
+        if (_mesh && _mesh->hasVertexData())
+        {
+            auto vertices = _mesh->getVertexBuffer();
+            uint oldVertNum = vertices._size / sizeof(VertexNormalTexCoord);
+            uint newVertNum = newVerts.size();
+            gpu::BufferView::Iterator<const VertexNormalTexCoord> vertexItr = vertices.cbegin<const VertexNormalTexCoord>();
+            uint i = 0;
+            for (; i < oldVertNum; i++)
+            {
+                if (i < newVertNum && (*vertexItr).vertex != newVerts[i])
+                {
+                    VertexStateChange actChange;
+                    actChange.type = VertexStateChange::VertexStateChangeType::Modified;
+                    actChange.index = i;
+                    actChange.newValue = newVerts[i];
+                    diffs.push_back(actChange);
+                }
+                else if (i >= newVertNum)
+                {
+                    VertexStateChange actChange;
+                    actChange.type = VertexStateChange::VertexStateChangeType::Deleted;
+                    actChange.index = i;
+                    diffs.push_back(actChange);
+                }
+                ++vertexItr;
+            }
+            if (newVertNum > oldVertNum)
+            {
+                VertexStateChange actChange;
+                actChange.type = VertexStateChange::VertexStateChangeType::Added;
+                actChange.index = i;
+                actChange.newValue = newVerts[i];
+                diffs.push_back(actChange);
+            }
+        }
+    });
+    return diffs;
 }
 
 bool RenderableLeoPolyEntityItem::doUploadViaFTP(std::string fileName)
