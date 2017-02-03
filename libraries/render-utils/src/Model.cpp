@@ -78,11 +78,12 @@ void initCollisionMaterials() {
     }
 }
 
-Model::Model(RigPointer rig, QObject* parent) :
+Model::Model(RigPointer rig, QObject* parent, SpatiallyNestable* spatiallyNestableOverride) :
     QObject(parent),
     _renderGeometry(),
     _collisionGeometry(),
     _renderWatcher(_renderGeometry),
+    _spatiallyNestableOverride(spatiallyNestableOverride),
     _translation(0.0f),
     _rotation(),
     _scale(1.0f, 1.0f, 1.0f),
@@ -131,6 +132,23 @@ void Model::setTranslation(const glm::vec3& translation) {
 void Model::setRotation(const glm::quat& rotation) {
     _rotation = rotation;
     updateRenderItems();
+}
+
+Transform Model::getTransform() const {
+    if (_spatiallyNestableOverride) {
+        bool success;
+        Transform transform = _spatiallyNestableOverride->getTransform(success);
+        if (success) {
+            transform.setScale(getScale());
+            return transform;
+        }
+    }
+
+    Transform transform;
+    transform.setScale(getScale());
+    transform.setTranslation(getTranslation());
+    transform.setRotation(getRotation());
+    return transform;
 }
 
 void Model::setScale(const glm::vec3& scale) {
@@ -214,21 +232,17 @@ void Model::updateRenderItems() {
 
         render::ScenePointer scene = AbstractViewStateInterface::instance()->getMain3DScene();
 
-        Transform modelTransform;
-        modelTransform.setTranslation(self->_translation);
-        modelTransform.setRotation(self->_rotation);
-
-        Transform scaledModelTransform(modelTransform);
-        scaledModelTransform.setScale(scale);
-
         uint32_t deleteGeometryCounter = self->_deleteGeometryCounter;
 
         render::PendingChanges pendingChanges;
         foreach (auto itemID, self->_modelMeshRenderItems.keys()) {
-            pendingChanges.updateItem<ModelMeshPartPayload>(itemID, [modelTransform, deleteGeometryCounter](ModelMeshPartPayload& data) {
+            pendingChanges.updateItem<ModelMeshPartPayload>(itemID, [deleteGeometryCounter](ModelMeshPartPayload& data) {
                 if (data._model && data._model->isLoaded()) {
                     // Ensure the model geometry was not reset between frames
                     if (deleteGeometryCounter == data._model->_deleteGeometryCounter) {
+                        Transform modelTransform = data._model->getTransform();
+                        modelTransform.setScale(glm::vec3(1.0f));
+
                         // lazy update of cluster matrices used for rendering.  We need to update them here, so we can correctly update the bounding box.
                         data._model->updateClusterMatrices();
 
@@ -243,10 +257,11 @@ void Model::updateRenderItems() {
         // collision mesh does not share the same unit scale as the FBX file's mesh: only apply offset
         Transform collisionMeshOffset;
         collisionMeshOffset.setIdentity();
+        Transform modelTransform = self->getTransform();
         foreach (auto itemID, self->_collisionRenderItems.keys()) {
-            pendingChanges.updateItem<MeshPartPayload>(itemID, [scaledModelTransform, collisionMeshOffset](MeshPartPayload& data) {
+            pendingChanges.updateItem<MeshPartPayload>(itemID, [modelTransform, collisionMeshOffset](MeshPartPayload& data) {
                 // update the model transform for this render item.
-                data.updateTransform(scaledModelTransform, collisionMeshOffset);
+                data.updateTransform(modelTransform, collisionMeshOffset);
             });
         }
 
@@ -272,8 +287,6 @@ void Model::reset() {
 }
 
 bool Model::updateGeometry() {
-    PROFILE_RANGE(render_detail, __FUNCTION__);
-    PerformanceTimer perfTimer("Model::updateGeometry");
     bool needFullUpdate = false;
 
     if (!isLoaded()) {
@@ -1128,7 +1141,11 @@ void Model::simulate(float deltaTime, bool fullUpdate) {
         if (_snapModelToRegistrationPoint && !_snappedToRegistrationPoint) {
             snapToRegistrationPoint();
         }
-        simulateInternal(deltaTime);
+        // update the world space transforms for all joints
+        glm::mat4 parentTransform = glm::scale(_scale) * glm::translate(_offset);
+        updateRig(deltaTime, parentTransform);
+
+        computeMeshPartLocalBounds();
     }
 }
 
@@ -1138,10 +1155,12 @@ void Model::updateRig(float deltaTime, glm::mat4 parentTransform) {
     _rig->updateAnimations(deltaTime, parentTransform);
 }
 
-void Model::simulateInternal(float deltaTime) {
-    // update the world space transforms for all joints
-    glm::mat4 parentTransform = glm::scale(_scale) * glm::translate(_offset);
-    updateRig(deltaTime, parentTransform);
+void Model::computeMeshPartLocalBounds() {
+	for (auto& part : _modelMeshRenderItemsSet) {
+        assert(part->_meshIndex < _modelMeshRenderItemsSet.size());
+        const Model::MeshState& state = _meshStates.at(part->_meshIndex);
+        part->computeAdjustedLocalBound(state.clusterMatrices);
+    }
 }
 
 // virtual
@@ -1320,6 +1339,7 @@ void Model::createVisibleRenderItemSet() {
             shapeID++;
         }
     }
+    computeMeshPartLocalBounds();
 }
 
 void Model::createCollisionRenderItemSet() {
