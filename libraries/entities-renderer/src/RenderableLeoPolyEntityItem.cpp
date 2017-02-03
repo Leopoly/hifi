@@ -996,8 +996,8 @@ std::vector<RenderableLeoPolyEntityItem::VertexStateChange> RenderableLeoPolyEnt
         if (_mesh && _mesh->hasVertexData())
         {
             auto vertices = _mesh->getVertexBuffer();
-            uint oldVertNum = vertices._size / sizeof(VertexNormalTexCoord);
-            uint newVertNum = newVerts.size();
+            uint oldVertNum = ((uint)vertices._size) / sizeof(VertexNormalTexCoord);
+            uint newVertNum = (uint)newVerts.size();
             gpu::BufferView::Iterator<const VertexNormalTexCoord> vertexItr = vertices.cbegin<const VertexNormalTexCoord>();
             uint i = 0;
             for (; i < oldVertNum; i++)
@@ -1021,11 +1021,14 @@ std::vector<RenderableLeoPolyEntityItem::VertexStateChange> RenderableLeoPolyEnt
             }
             if (newVertNum > oldVertNum)
             {
-                VertexStateChange actChange;
-                actChange.type = VertexStateChange::VertexStateChangeType::Added;
-                actChange.index = i;
-                actChange.newValue = newVerts[i];
-                diffs.push_back(actChange);
+				for (; i < newVertNum; i++)
+				{
+					VertexStateChange actChange;
+					actChange.type = VertexStateChange::VertexStateChangeType::Added;
+					actChange.index = i;
+					actChange.newValue = newVerts[i];
+					diffs.push_back(actChange);
+				}
             }
         }
     });
