@@ -9,8 +9,8 @@ if (WIN32)
 
   ExternalProject_Add(
         ${EXTERNAL_NAME}
-        URL https://s3.amazonaws.com/hifi-public/dependencies/LeoPolySDK-5.zip
-        URL_MD5 04e413a990126a12c659d06d7ec0b317
+        URL https://github.com/fecso8787/HifiPlugin/raw/master/LeoPolySDK-5.zip
+        URL_MD5 fa1a1de950e45306a7c854ebf6c3871c
         CONFIGURE_COMMAND ""
         BUILD_COMMAND ""
         INSTALL_COMMAND ""
@@ -48,8 +48,8 @@ else () # Linux
 
   ExternalProject_Add(
         ${EXTERNAL_NAME}
-        URL https://s3.amazonaws.com/hifi-public/dependencies/LeoPolySDK-Stub-5.zip
-        URL_MD5 7e43058cc8c6e75b533d9dc6a281bc8d
+        URL https://github.com/fecso8787/HifiPlugin/raw/master/LeoPolySDK-5-Linux.zip
+        URL_MD5 57bd562f67c587161a7529040f5f1207
         CONFIGURE_COMMAND ""
         BUILD_COMMAND ""
         INSTALL_COMMAND ""
@@ -60,6 +60,8 @@ else () # Linux
   set_target_properties(${EXTERNAL_NAME} PROPERTIES FOLDER "hidden/externals")
   ExternalProject_Get_Property(${EXTERNAL_NAME} SOURCE_DIR)
   set(${EXTERNAL_NAME_UPPER}_INCLUDE_DIRS ${SOURCE_DIR} CACHE TYPE INTERNAL)
+  set(${EXTERNAL_NAME_UPPER}_SHARED_OBJECT ${SOURCE_DIR}/lib/Debug/libSculptAppDLL.so CACHE FILEPATH "Leopoly core library")
+  set(${EXTERNAL_NAME_UPPER}_CORE_LIBRARY_RELEASE ${SOURCE_DIR}/lib/Release/libSculptAppDLL.so CACHE FILEPATH "Leopoly core library")
 
 endif()
  
