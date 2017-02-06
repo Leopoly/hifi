@@ -60,8 +60,8 @@ else () # Linux
   set_target_properties(${EXTERNAL_NAME} PROPERTIES FOLDER "hidden/externals")
   ExternalProject_Get_Property(${EXTERNAL_NAME} SOURCE_DIR)
   set(${EXTERNAL_NAME_UPPER}_INCLUDE_DIRS ${SOURCE_DIR} CACHE TYPE INTERNAL)
-  set(${EXTERNAL_NAME_UPPER}_SHARED_OBJECT ${SOURCE_DIR}/lib/Debug/libSculptAppDLL.so CACHE FILEPATH "Leopoly core library")
-  set(${EXTERNAL_NAME_UPPER}_CORE_LIBRARY_RELEASE ${SOURCE_DIR}/lib/Release/libSculptAppDLL.so CACHE FILEPATH "Leopoly core library")
+  set(${EXTERNAL_NAME_UPPER}_SHARED_OBJECT_DEBUG ${SOURCE_DIR}/lib/Debug/libSculptAppDLL.so CACHE FILEPATH "Leopoly core library")
+  set(${EXTERNAL_NAME_UPPER}_SHARED_OBJECT_RELEASE ${SOURCE_DIR}/lib/Release/libSculptAppDLL.so CACHE FILEPATH "Leopoly core library")
 
 endif()
  
