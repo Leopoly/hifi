@@ -508,6 +508,8 @@ private:
     void maybeToggleMenuVisible(QMouseEvent* event) const;
     void toggleTabletUI() const;
 
+    void perFrameUpdateLeoEngine()const;
+
     MainWindow* _window;
     QElapsedTimer& _sessionRunTimer;
 

@@ -62,6 +62,7 @@ void EntityItemProperties::debugDump() const {
     qCDebug(entities) << "EntityItemProperties...";
     qCDebug(entities) << "    _type=" << EntityTypes::getEntityTypeName(_type);
     qCDebug(entities) << "   _id=" << _id;
+
     qCDebug(entities) << "   _idSet=" << _idSet;
     qCDebug(entities) << "   _position=" << _position.x << "," << _position.y << "," << _position.z;
     qCDebug(entities) << "   _dimensions=" << getDimensions();
@@ -71,6 +72,9 @@ void EntityItemProperties::debugDump() const {
     getAnimation().debugDump();
     getSkybox().debugDump();
     getKeyLight().debugDump();
+
+    qCDebug(entities) << "   _leoPolyURL=" << _leoPolyURL;
+    qCDebug(entities) << "   _leoPolyModelVersion=" << _leoPolyModelVersion;
 
     qCDebug(entities) << "   changed properties...";
     EntityPropertyFlags props = getChangedProperties();
@@ -332,6 +336,12 @@ EntityPropertyFlags EntityItemProperties::getChangedProperties() const {
 
     CHECK_PROPERTY_CHANGE(PROP_SHAPE, shape);
     CHECK_PROPERTY_CHANGE(PROP_DPI, dpi);
+    CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_URL, leoPolyURL);
+    CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_MODEL_VERSION, leoPolyModelVersion);
+
+    CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_CONTROLLER_POS, leoPolyControllerPos);
+    CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_CONTROLLER_ROT, leoPolyControllerRot);
+    CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_TRIGGER_STATE, leoPolyTriggerState);
 
     changedProperties += _animation.getChangedProperties();
     changedProperties += _keyLight.getChangedProperties();
@@ -539,6 +549,17 @@ QScriptValue EntityItemProperties::copyToScriptValue(QScriptEngine* engine, bool
         COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_TEXTURES, textures);
     }
 
+
+    if (_type == EntityTypes::LeoPoly) {
+        COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_LEOPOLY_URL, leoPolyURL);
+        COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_LEOPOLY_MODEL_VERSION, leoPolyModelVersion);
+
+        COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_LEOPOLY_CONTROLLER_POS, leoPolyControllerPos);
+        COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_LEOPOLY_CONTROLLER_ROT, leoPolyControllerRot);
+        COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_LEOPOLY_TRIGGER_STATE, leoPolyTriggerState);
+    }
+
+ 
     if (!skipDefaults && !strictSemantics) {
         AABox aaBox = getAABox();
         QScriptValue boundingBox = engine->newObject();
@@ -738,6 +759,12 @@ void EntityItemProperties::copyFromScriptValue(const QScriptValue& object, bool 
     COPY_PROPERTY_FROM_QSCRIPTVALUE(owningAvatarID, QUuid, setOwningAvatarID);
 
     COPY_PROPERTY_FROM_QSCRIPTVALUE(dpi, uint16_t, setDPI);
+    COPY_PROPERTY_FROM_QSCRIPTVALUE(leoPolyURL, QString, setLeoPolyURL);
+    COPY_PROPERTY_FROM_QSCRIPTVALUE(leoPolyModelVersion, QUuid, setLeoPolyModelVersion);
+
+    COPY_PROPERTY_FROM_QSCRIPTVALUE(leoPolyControllerPos, glmVec3, setLeoPolyControllerPos);
+    COPY_PROPERTY_FROM_QSCRIPTVALUE(leoPolyControllerRot, glmQuat, setLeoPolyControllerRot);
+    COPY_PROPERTY_FROM_QSCRIPTVALUE(leoPolyTriggerState, float, setLeoPolyTriggerState);
 
     _lastEdited = usecTimestampNow();
 }
@@ -867,6 +894,12 @@ void EntityItemProperties::merge(const EntityItemProperties& other) {
     COPY_PROPERTY_IF_CHANGED(owningAvatarID);
 
     COPY_PROPERTY_IF_CHANGED(dpi);
+
+    COPY_PROPERTY_IF_CHANGED(leoPolyURL);
+    COPY_PROPERTY_IF_CHANGED(leoPolyModelVersion);
+    COPY_PROPERTY_IF_CHANGED(leoPolyControllerPos);
+    COPY_PROPERTY_IF_CHANGED(leoPolyControllerRot);
+    COPY_PROPERTY_IF_CHANGED(leoPolyTriggerState);
 
     _lastEdited = usecTimestampNow();
 }
@@ -1049,6 +1082,12 @@ void EntityItemProperties::entityPropertyFlagsFromScriptValue(const QScriptValue
         ADD_PROPERTY_TO_MAP(PROP_FILTER_URL, FilterURL, filterURL, QString);
 
         ADD_PROPERTY_TO_MAP(PROP_DPI, DPI, dpi, uint16_t);
+
+        ADD_PROPERTY_TO_MAP(PROP_LEOPOLY_URL, LeoPolyURL, leoPolyURL, QString);
+        ADD_PROPERTY_TO_MAP(PROP_LEOPOLY_MODEL_VERSION, LeoPolyModelVersion, leoPolyModelVersion, QUuid);
+        ADD_PROPERTY_TO_MAP(PROP_LEOPOLY_CONTROLLER_POS, LeoPolyControllerPos, leoPolyControllerPos, glm::vec3);
+        ADD_PROPERTY_TO_MAP(PROP_LEOPOLY_CONTROLLER_POS, LeoPolyControllerRot, leoPolyControllerRot, glm::quat);
+        ADD_PROPERTY_TO_MAP(PROP_LEOPOLY_TRIGGER_STATE, LeoPolyTriggerState, leoPolyTriggerState, float);
 
         // FIXME - these are not yet handled
         //ADD_PROPERTY_TO_MAP(PROP_CREATED, Created, created, quint64);
@@ -1332,11 +1371,22 @@ bool EntityItemProperties::encodeEntityEditPacket(PacketType command, EntityItem
                 properties.getType() == EntityTypes::Sphere) {
                 APPEND_ENTITY_PROPERTY(PROP_SHAPE, properties.getShape());
             }
+
+            if (properties.getType() == EntityTypes::LeoPoly) {
+                APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_URL, properties.getLeoPolyURL());
+                APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_MODEL_VERSION, properties.getLeoPolyModelVersion());
+                APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_CONTROLLER_POS, properties.getLeoPolyControllerPos());
+                APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_CONTROLLER_ROT, properties.getLeoPolyControllerRot());
+                APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_TRIGGER_STATE, properties.getLeoPolyTriggerState());
+            }
+
             APPEND_ENTITY_PROPERTY(PROP_MARKETPLACE_ID, properties.getMarketplaceID());
             APPEND_ENTITY_PROPERTY(PROP_NAME, properties.getName());
             APPEND_ENTITY_PROPERTY(PROP_COLLISION_SOUND_URL, properties.getCollisionSoundURL());
             APPEND_ENTITY_PROPERTY(PROP_ACTION_DATA, properties.getActionData());
             APPEND_ENTITY_PROPERTY(PROP_ALPHA, properties.getAlpha());
+
+           
         }
 
         if (propertyCount > 0) {
@@ -1635,6 +1685,14 @@ bool EntityItemProperties::decodeEntityEditPacket(const unsigned char* data, int
     READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_COLLISION_SOUND_URL, QString, setCollisionSoundURL);
     READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_ACTION_DATA, QByteArray, setActionData);
     READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_ALPHA, float, setAlpha);
+
+    if (properties.getType() == EntityTypes::LeoPoly) {
+        READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_LEOPOLY_URL, QString, setLeoPolyURL);
+        READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_LEOPOLY_MODEL_VERSION, QUuid, setLeoPolyModelVersion);
+        READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_LEOPOLY_CONTROLLER_POS, glm::vec3, setLeoPolyControllerPos);
+        READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_LEOPOLY_CONTROLLER_ROT, glm::quat, setLeoPolyControllerRot);
+        READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_LEOPOLY_TRIGGER_STATE, float, setLeoPolyTriggerState);
+    }
 
     return valid;
 }

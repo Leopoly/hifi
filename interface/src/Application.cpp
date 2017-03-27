@@ -103,6 +103,8 @@
 #include <plugins/SteamClientPlugin.h>
 #include <RecordingScriptingInterface.h>
 #include <RenderableWebEntityItem.h>
+#include <RenderableModelEntityItem.h>
+#include <RenderableLeoPolyEntityItem.h>
 #include <RenderShadowTask.h>
 #include <render/RenderFetchCullSortTask.h>
 #include <RenderDeferredTask.h>
@@ -1909,6 +1911,11 @@ void Application::initializeGL() {
     // update before the first render
     update(0);
 
+    LeoPolyPlugin::Instance().SculptApp_init();
+    while (LeoPolyPlugin::Instance().getAppState() == LeoPlugin::SculptApp_AppState::APPSTATE_WAIT)
+    {
+        LeoPolyPlugin::Instance().SculptApp_Frame();
+    }
 }
 
 FrameTimingsScriptingInterface _frameTimingsScriptingInterface;
@@ -2301,8 +2308,156 @@ void Application::paintGL() {
         Stats::getInstance()->setRenderDetails(renderArgs._details);
     }
 
+    perFrameUpdateLeoEngine();
+
     uint64_t lastPaintDuration = usecTimestampNow() - lastPaintBegin;
     _frameTimingsScriptingInterface.addValue(lastPaintDuration);
+}
+
+void Application::perFrameUpdateLeoEngine()const
+{
+
+    if (LeoPolyPlugin::Instance().CurrentlyUnderEdit.data1 != 0)
+    {
+        auto myAvatar = getMyAvatar();
+
+        double buttons[] = { _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::RT_CLICK), 0, 0, 0 };
+        auto rightHandPose = myAvatar->getRightHandControllerPoseInWorldFrame();
+        auto leftHandPose = myAvatar->getRightHandControllerPoseInWorldFrame();
+
+
+        double dArray[16] = { 0.0 };
+        glm::mat4 rightHandMat = glm::transpose(Transform(rightHandPose.getRotation(), Transform::Vec3(1, 1, 1), rightHandPose.getTranslation()).getMatrix());
+        glm::mat4 leftHandMat = glm::transpose(Transform(leftHandPose.getRotation(), Transform::Vec3(1, 1, 1), leftHandPose.getTranslation()).getMatrix());
+        const float *pSource = const_cast<float*>(glm::value_ptr(rightHandMat));
+        for (int i = 0; i < 16; ++i)
+            dArray[i] = pSource[i];
+
+        LeoPolyPlugin::Instance().setControllerStatesInput(0, 0, buttons,
+            _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::RS_X),
+            _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::RS_Y), dArray);
+
+        buttons[0] = _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::LT_CLICK);
+
+        pSource = const_cast<float*>(glm::value_ptr(leftHandMat));
+        for (int i = 0; i < 16; ++i)
+            dArray[i] = pSource[i];
+
+        LeoPolyPlugin::Instance().setControllerStatesInput(1, 1, buttons,
+            _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::LS_X),
+            _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::LS_Y),
+            dArray);
+        EntityItemID entityUnderSculptID;
+
+        entityUnderSculptID.data1 = LeoPolyPlugin::Instance().CurrentlyUnderEdit.data1;
+        entityUnderSculptID.data2 = LeoPolyPlugin::Instance().CurrentlyUnderEdit.data2;
+        entityUnderSculptID.data3 = LeoPolyPlugin::Instance().CurrentlyUnderEdit.data3;
+        for (int i = 0; i < 8; i++)
+            entityUnderSculptID.data4[i] = LeoPolyPlugin::Instance().CurrentlyUnderEdit.data4[i];
+
+        auto tree = getEntities()->getTree();
+        static bool idle = true;
+        auto uploadComplete = [=](AssetUpload* upload, const QString& hash) mutable
+        {
+            if (upload->getError() != AssetUpload::NoError)
+            {
+                QString errorInfo = "Could not upload asset to the Asset Server.";
+                qWarning(interfaceapp) << "Error downloading asset: " + errorInfo;
+            }
+            else
+            {
+                /*edited->setLeoPolyURL("atp:" + hash);
+                edited->setLeoPolyModelVersion(QUuid::createUuid());*/
+                tree->withWriteLock([&]
+                {
+                    RenderableLeoPolyEntityItem* edited = (RenderableLeoPolyEntityItem*)tree->findByID(entityUnderSculptID).get();
+                    auto sender = qApp->getEntityEditPacketSender();
+                    auto props = edited->getProperties();
+                    props.setLeoPolyURL("atp:/" + hash);
+                    props.setLeoPolyModelVersion(QUuid::createUuid());
+                    edited->setLastBroadcast(usecTimestampNow());
+                    sender->queueEditEntityMessage(PacketType::EntityEdit, tree, edited->getID(), props);
+                });
+
+            }
+            idle = true;
+        };
+
+        tree->withWriteLock([&]
+        {
+            RenderableLeoPolyEntityItem* edited = (RenderableLeoPolyEntityItem*)tree->findByID(entityUnderSculptID).get();
+            bool isServing = false;
+            auto nodeList = DependencyManager::get<NodeList>();
+            const QUuid myNodeID = nodeList->getSessionUUID();
+            if (edited && myNodeID == edited->getOwningAvatarID())
+            {
+                isServing = true;
+            }
+            //Keyframe send
+            
+            if (idle && edited && edited->getLastBroadcast() + 2000000 < usecTimestampNow() && isServing)
+            {
+                edited->doExportCurrentState();
+                std::string uploadPath = "Temp\\";//TODO: Will be replaced
+                std::string urlPath = edited->getLeoPolyURL().toStdString();
+                const size_t last_slash_idx = urlPath.find_last_of("\\/");
+                if (std::string::npos != last_slash_idx)
+                {
+                    urlPath.erase(0, last_slash_idx + 1);
+                }
+                if (std::string::npos != urlPath.find("atp:/"))
+                {
+                    urlPath.erase(0, 5);
+                }
+                if (std::string::npos == urlPath.find(".obj"))
+                {
+                    urlPath = urlPath + ".obj";
+                }
+                // use an asset client to upload the asset
+                auto assetClient = DependencyManager::get<AssetClient>();
+
+                auto upload = assetClient->createUpload(QString((uploadPath + urlPath).c_str()));
+
+                //qCDebug(asset_migrator) << "Starting upload of asset from" << filePath;
+
+                // connect to the finished signal so we know when the AssetUpload is done
+                QObject::connect(upload, &AssetUpload::finished, this, uploadComplete);
+                idle = false;
+                // start the upload now
+                upload->start();
+
+            }
+            else
+            {
+                if (isServing && edited->getLastBroadcast() + 20000 < usecTimestampNow())
+                {
+                    auto sender = qApp->getEntityEditPacketSender();
+                    auto props = edited->getProperties();
+                    props.setLeoPolyControllerPos(rightHandPose.getTranslation());
+                    props.setLeoPolyControllerRot(rightHandPose.getRotation());
+                    
+                    props.setLeoPolyTriggerState(_controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::RT_CLICK));
+                    sender->queueEditEntityMessage(PacketType::EntityEdit, tree, edited->getID(), props);
+                }
+            }
+            if (!isServing && edited && edited->getLeoPolyTriggerState() == 1)
+            {
+                double buttons[] = { edited->getLeoPolyTriggerState(), 0, 0, 0 };
+                double dArray[16] = { 0.0 };
+                glm::mat4 rightHandMat = glm::transpose(Transform(edited->getLeoPolyControllerRot(), Transform::Vec3(1, 1, 1), edited->getLeoPolyControllerPos()).getMatrix());
+                const float *pSource = const_cast<float*>(glm::value_ptr(rightHandMat));
+                memcpy(dArray, pSource, 16*sizeof(float));
+
+                LeoPolyPlugin::Instance().setControllerStatesInput(0, 0, buttons,
+                    _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::RS_X),
+                    _controllerScriptingInterface->getButtonValue(controller::StandardButtonChannel::RS_Y), dArray);
+
+            }
+        });
+
+    }
+
+    /*Will be removed from here ^ */
 }
 
 void Application::runTests() {

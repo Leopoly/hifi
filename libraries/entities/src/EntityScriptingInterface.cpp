@@ -33,6 +33,7 @@
 #include "SimulationOwner.h"
 #include "ZoneEntityItem.h"
 #include "WebEntityItem.h"
+#include "LeoPolyEntityItem.h"
 #include <EntityScriptClient.h>
 #include <Profile.h>
 
@@ -353,6 +354,7 @@ QUuid EntityScriptingInterface::editEntity(QUuid id, const EntityItemProperties&
             return;
         }
 
+
         auto nodeList = DependencyManager::get<NodeList>();
         if (entity->getClientOnly() && entity->getOwningAvatarID() != nodeList->getSessionUUID()) {
             // don't edit other avatar's avatarEntities
@@ -463,6 +465,7 @@ QUuid EntityScriptingInterface::editEntity(QUuid id, const EntityItemProperties&
             });
         }
     });
+
     queueEntityMessage(PacketType::EntityEdit, entityID, properties);
     return id;
 }
@@ -1657,6 +1660,76 @@ void EntityScriptingInterface::setCostMultiplier(float value) {
     costMultiplier = value;
 }
 
+void EntityScriptingInterface::issueSculptDLLCommand(QString command, QString value)
+{
+    LeoPolyPlugin::Instance().SculptApp_issueAppCmd(command.toStdString().c_str(), value.toStdString().c_str());
+    qDebug() << "Issue LeoSculptCommand: " << command << " with value:" << value;
+}
+
+void EntityScriptingInterface::sculptEntity(QUuid id)
+{
+    EntityItemID entityID(id);
+
+    // If we have a local entity tree set, then also update it.
+    if (_entityTree) {
+        _entityTree->withWriteLock([&] {
+            EntityItemPointer entity = _entityTree->findEntityByEntityItemID(entityID);
+            if (entity && entity->getType()==EntityTypes::Model) 
+            {
+                auto props = EntityItemProperties(entity->getProperties());
+                props.setDescription(QString(entity->getName() + " under sculpting"));
+                props.setPosition(entity->getPosition());
+                props.setDimensions(entity->getDimensions());
+                props.setRotation(entity->getRotation());
+                props.setType(EntityTypes::LeoPoly);
+                props.setCreated(secTimestampNow()); 
+                auto nodeList = DependencyManager::get<NodeList>();
+                const QUuid myNodeID = nodeList->getSessionUUID();
+                props.setOwningAvatarID(myNodeID);
+                std::string fileName = entity->getID().toString().toStdString();
+                char chars[] = "{}-";
+
+                for (unsigned int i = 0; i < strlen(chars); ++i)
+                {
+                    // you need include <algorithm> to use general algorithms like std::remove()
+                    fileName.erase(std::remove(fileName.begin(), fileName.end(), chars[i]), fileName.end());
+                }
+                fileName = std::string(fileName.begin() + 1, fileName.end() - 1);
+                
+#ifdef LeoFTP_Inside
+                props.setLeoPolyURL(QString("ftp://Anonymus@192.168.8.8:21/" + QString(fileName.c_str()) + ".obj"));
+#else
+                props.setLeoPolyURL(QString("ftp://Anonymus@86.101.231.173:2121/" + QString(fileName.c_str()) + ".obj"));
+#endif
+                props.setRegistrationPoint(entity->getRegistrationPoint());
+                props.setCollisionless(true);
+                props.setLeoPolyModelVersion(QUuid::createUuid());
+                EntityItemID leoId = EntityItemID(addEntity(props));
+
+                auto newEntity = _entityTree->findEntityByEntityItemID(leoId);
+                if (newEntity)
+                {                 
+                    newEntity->setRegistrationPoint(entity->getRegistrationPoint());
+                    static_cast<LeoPolyEntityItem*>(newEntity.get())->sendToLeoEngine(_entityTree->getModelForEntityItem(entity));
+                   // newEntity->setTransform(entity->getTransform());
+                   // newEntity->setScale(entity->getScale());
+                    queueEntityMessage(PacketType::EntityEdit, leoId, newEntity->getProperties());
+                }
+                // auto newEntity=_entityTree->addEntity(leoId, props);
+                //  
+                LeoPolyPlugin::Instance().CurrentlyUnderEdit.data1 = leoId.data1;
+                LeoPolyPlugin::Instance().CurrentlyUnderEdit.data2 = leoId.data2;
+                LeoPolyPlugin::Instance().CurrentlyUnderEdit.data3 = leoId.data3;
+                LeoPolyPlugin::Instance().CurrentlyUnderEdit.data4 = new unsigned char[8];
+                for (int i = 0; i < 8; i++)
+                    LeoPolyPlugin::Instance().CurrentlyUnderEdit.data4[i] = leoId.data4[i];
+                return;
+
+            }
+        });
+    }
+}
+
 QObject* EntityScriptingInterface::getWebViewRoot(const QUuid& entityID) {
     if (auto entity = checkForTreeEntityAndTypeMatch(entityID, EntityTypes::Web)) {
         auto webEntity = std::dynamic_pointer_cast<WebEntityItem>(entity);
@@ -1665,6 +1738,7 @@ QObject* EntityScriptingInterface::getWebViewRoot(const QUuid& entityID) {
     } else {
         return nullptr;
     }
+
 }
 
 // TODO move this someplace that makes more sense...
@@ -1691,3 +1765,4 @@ glm::mat4 EntityScriptingInterface::getEntityTransform(const QUuid& entityID) {
     }
     return result;
 }
+

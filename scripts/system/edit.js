@@ -890,6 +890,14 @@ function setupModelMenus() {
         });
         modelMenuAddedDelete = true;
     }
+if (!Menu.menuItemExists("Edit", "Sculpt Model")) {
+        Menu.addMenuItem({
+            menuName: "Edit",
+            menuItemName: "Sculpt Model",
+            afterItem: "Entities",
+            grouping: "Advanced"
+        });
+    }
     Menu.addMenuItem({
         menuName: "Edit",
         menuItemName: "Entity List...",
@@ -1018,8 +1026,12 @@ function cleanupModelMenus() {
         Menu.removeMenuItem("Edit", "Delete");
     }
 
+    Menu.removeMenuItem("Edit", "Sculpt Model");
+
+
     Menu.removeMenuItem("Edit", "Parent Entity to Last");
     Menu.removeMenuItem("Edit", "Unparent Entity");
+
     Menu.removeMenuItem("Edit", "Entity List...");
     Menu.removeMenuItem("Edit", "Allow Selecting of Large Models");
     Menu.removeMenuItem("Edit", "Allow Selecting of Small Models");
@@ -1281,6 +1293,27 @@ function toggleSelectedEntitiesVisible() {
     }
 }
 
+function sculptSelectedEntities() {
+    if (SelectionManager.hasSelection()) {
+        selectedParticleEntity = 0;
+        particleExplorerTool.destroyWebView();
+        SelectionManager.saveProperties();
+        //var savedProperties = [];
+        for (var i = 0; i < selectionManager.selections.length; i++) {
+            var entityID = SelectionManager.selections[i];
+         //   var initialProperties = SelectionManager.savedProperties[entityID];
+         //   SelectionManager.savedProperties[entityID];
+         //   savedProperties.push({
+        //        entityID: entityID,
+        //        properties: initialProperties
+         //   });
+            Entities.sculptEntity(entityID);
+        }
+        SelectionManager.clearSelections();
+       // pushCommandForSelections([], savedProperties);
+    }
+}
+
 function handeMenuEvent(menuItem) {
     if (menuItem === "Allow Selecting of Small Models") {
         allowSmallModels = Menu.isOptionChecked("Allow Selecting of Small Models");
@@ -1290,6 +1323,8 @@ function handeMenuEvent(menuItem) {
         Entities.setLightsArePickable(Menu.isOptionChecked("Allow Selecting of Lights"));
     } else if (menuItem === "Delete") {
         deleteSelectedEntities();
+    } else if (menuItem === "Sculpt Model") {
+        sculptSelectedEntities();
     } else if (menuItem === "Parent Entity to Last") {
         parentSelectedEntities();
     } else if (menuItem === "Unparent Entity") {

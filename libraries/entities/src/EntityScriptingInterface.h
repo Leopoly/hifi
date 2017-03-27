@@ -26,6 +26,7 @@
 #include <PointerEvent.h>
 
 #include "PolyVoxEntityItem.h"
+#include "LeoPolyEntityItem.h"
 #include "LineEntityItem.h"
 #include "PolyLineEntityItem.h"
 #include "EntityTree.h"
@@ -33,6 +34,7 @@
 #include "EntityEditPacketSender.h"
 #include "EntitiesScriptEngineProvider.h"
 #include "EntityItemProperties.h"
+#include <Plugin.h>
 
 #include "BaseScriptEngine.h"
 
@@ -176,6 +178,12 @@ public slots:
      * @param {EntityID} entityID The ID of the entity to delete.
      */
     Q_INVOKABLE void deleteEntity(QUuid entityID);
+
+    //sculptEntity
+    Q_INVOKABLE void sculptEntity(QUuid entityID);
+
+    //issuecommand for SculptDll
+    Q_INVOKABLE void issueSculptDLLCommand(QString command, QString value);
 
     /// Allows a script to call a method on an entity's script. The method will execute in the entity script
     /// engine. If the entity does not have an entity script or the method does not exist, this call will have
