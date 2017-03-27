@@ -51,6 +51,7 @@
 #include <RunningMarker.h>
 
 #include "avatar/MyAvatar.h"
+#include "BandwidthRecorder.h"
 #include "Bookmarks.h"
 #include "Camera.h"
 #include "ConnectionMonitor.h"
@@ -61,7 +62,7 @@
 #include "scripting/ControllerScriptingInterface.h"
 #include "scripting/DialogsManagerScriptingInterface.h"
 #include "ui/ApplicationOverlay.h"
-#include "ui/BandwidthDialog.h"
+#include "ui/EntityScriptServerLogDialog.h"
 #include "ui/LodToolsDialog.h"
 #include "ui/LogDialog.h"
 #include "ui/OctreeStatsDialog.h"
@@ -71,6 +72,8 @@
 
 #include <procedural/ProceduralSkybox.h>
 #include <model/Skybox.h>
+#include <ModelScriptingInterface.h>
+
 
 class OffscreenGLCanvas;
 class GLCanvas;
@@ -213,6 +216,15 @@ public:
     float getDesktopTabletScale() { return _desktopTabletScale.get(); }
     void setDesktopTabletScale(float desktopTabletScale);
 
+    bool getDesktopTabletBecomesToolbarSetting() { return _desktopTabletBecomesToolbarSetting.get(); }
+    void setDesktopTabletBecomesToolbarSetting(bool value);
+    bool getHmdTabletBecomesToolbarSetting() { return _hmdTabletBecomesToolbarSetting.get(); }
+    void setHmdTabletBecomesToolbarSetting(bool value);
+    bool getTabletVisibleToOthersSetting() { return _tabletVisibleToOthersSetting.get(); }
+    void setTabletVisibleToOthersSetting(bool value);
+    bool getPreferAvatarFingerOverStylus() { return _preferAvatarFingerOverStylusSetting.get(); }
+    void setPreferAvatarFingerOverStylus(bool value);
+
     float getSettingConstrainToolbarPosition() { return _constrainToolbarPosition.get(); }
     void setSettingConstrainToolbarPosition(bool setting);
 
@@ -266,8 +278,6 @@ public:
 
     virtual void pushPostUpdateLambda(void* key, std::function<void()> func) override;
 
-    const QRect& getMirrorViewRect() const { return _mirrorViewRect; }
-
     void updateMyAvatarLookAtPosition();
 
     float getAvatarSimrate() const { return _avatarSimCounter.rate(); }
@@ -292,6 +302,10 @@ public:
     Q_INVOKABLE void sendHoverOverEntity(QUuid id, PointerEvent event);
     Q_INVOKABLE void sendHoverLeaveEntity(QUuid id, PointerEvent event);
 
+    OverlayID getTabletScreenID() const;
+    OverlayID getTabletHomeButtonID() const;
+    QUuid getTabletFrameID() const; // may be an entity or an overlay
+
 signals:
     void svoImportRequested(const QString& url);
 
@@ -309,11 +323,13 @@ public slots:
     bool exportEntities(const QString& filename, float x, float y, float z, float scale);
     bool importEntities(const QString& url);
     void updateThreadPoolCount() const;
+    void updateSystemTabletMode();
 
     static void setLowVelocityFilter(bool lowVelocityFilter);
     Q_INVOKABLE void loadDialog();
     Q_INVOKABLE void loadScriptURLDialog() const;
     void toggleLogDialog();
+    void toggleEntityScriptServerLogDialog();
     void toggleRunningScriptsWidget() const;
     Q_INVOKABLE void showAssetServerWidget(QString filePath = "");
 
@@ -352,7 +368,6 @@ public slots:
     void calibrateEyeTracker5Points();
 #endif
 
-    void aboutApp();
     static void showHelp();
 
     void cycleCamera();
@@ -379,10 +394,12 @@ public slots:
     void setKeyboardFocusEntity(QUuid id);
     void setKeyboardFocusEntity(EntityItemID entityItemID);
 
-    unsigned int getKeyboardFocusOverlay();
-    void setKeyboardFocusOverlay(unsigned int overlayID);
+    OverlayID getKeyboardFocusOverlay();
+    void setKeyboardFocusOverlay(OverlayID overlayID);
 
     void addAssetToWorldMessageClose();
+
+    Q_INVOKABLE void toggleMuteAudio();
 
 private slots:
     void showDesktop();
@@ -476,7 +493,7 @@ private:
 
     void mouseMoveEvent(QMouseEvent* event);
     void mousePressEvent(QMouseEvent* event);
-    void mouseDoublePressEvent(QMouseEvent* event) const;
+    void mouseDoublePressEvent(QMouseEvent* event);
     void mouseReleaseEvent(QMouseEvent* event);
 
     void touchBeginEvent(QTouchEvent* event);
@@ -541,13 +558,15 @@ private:
     int _avatarSimsPerSecondReport {0};
     quint64 _lastAvatarSimsPerSecondUpdate {0};
     Camera _myCamera;                            // My view onto the world
-    Camera _mirrorCamera;                        // Camera for mirror view
-    QRect _mirrorViewRect;
 
     Setting::Handle<QString> _previousScriptLocation;
     Setting::Handle<float> _fieldOfView;
     Setting::Handle<float> _hmdTabletScale;
     Setting::Handle<float> _desktopTabletScale;
+    Setting::Handle<bool> _desktopTabletBecomesToolbarSetting;
+    Setting::Handle<bool> _hmdTabletBecomesToolbarSetting;
+    Setting::Handle<bool> _tabletVisibleToOthersSetting;
+    Setting::Handle<bool> _preferAvatarFingerOverStylusSetting;
     Setting::Handle<bool> _constrainToolbarPosition;
 
     float _scaleMirror;
@@ -568,6 +587,7 @@ private:
     NodeToOctreeSceneStats _octreeServerSceneStats;
     ControllerScriptingInterface* _controllerScriptingInterface{ nullptr };
     QPointer<LogDialog> _logDialog;
+    QPointer<EntityScriptServerLogDialog> _entityScriptServerLogDialog;
 
     FileLogger* _logger;
 
@@ -607,7 +627,7 @@ private:
     DialogsManagerScriptingInterface* _dialogsManagerScriptingInterface = new DialogsManagerScriptingInterface();
 
     ThreadSafeValueCache<EntityItemID> _keyboardFocusedEntity;
-    ThreadSafeValueCache<unsigned int> _keyboardFocusedOverlay;
+    ThreadSafeValueCache<OverlayID> _keyboardFocusedOverlay;
     quint64 _lastAcceptedKeyPress = 0;
     bool _isForeground = true; // starts out assumed to be in foreground
     bool _inPaint = false;

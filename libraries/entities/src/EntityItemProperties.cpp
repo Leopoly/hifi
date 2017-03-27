@@ -49,13 +49,6 @@ EntityItemProperties::EntityItemProperties(EntityPropertyFlags desiredProperties
 
 }
 
-void EntityItemProperties::setSittingPoints(const QVector<SittingPoint>& sittingPoints) {
-    _sittingPoints.clear();
-    foreach (SittingPoint sitPoint, sittingPoints) {
-        _sittingPoints.append(sitPoint);
-    }
-}
-
 void EntityItemProperties::calculateNaturalPosition(const glm::vec3& min, const glm::vec3& max) {
     glm::vec3 halfDimension = (max - min) / 2.0f;
     _naturalPosition = max - halfDimension;
@@ -336,6 +329,7 @@ EntityPropertyFlags EntityItemProperties::getChangedProperties() const {
 
     CHECK_PROPERTY_CHANGE(PROP_FLYING_ALLOWED, flyingAllowed);
     CHECK_PROPERTY_CHANGE(PROP_GHOSTING_ALLOWED, ghostingAllowed);
+    CHECK_PROPERTY_CHANGE(PROP_FILTER_URL, filterURL);
 
     CHECK_PROPERTY_CHANGE(PROP_CLIENT_ONLY, clientOnly);
     CHECK_PROPERTY_CHANGE(PROP_OWNING_AVATAR_ID, owningAvatarID);
@@ -519,6 +513,7 @@ QScriptValue EntityItemProperties::copyToScriptValue(QScriptEngine* engine, bool
 
         COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_FLYING_ALLOWED, flyingAllowed);
         COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_GHOSTING_ALLOWED, ghostingAllowed);
+        COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_FILTER_URL, filterURL);
     }
 
     // Web only
@@ -554,6 +549,7 @@ QScriptValue EntityItemProperties::copyToScriptValue(QScriptEngine* engine, bool
         COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_TEXTURES, textures);
     }
 
+
     if (_type == EntityTypes::LeoPoly) {
         COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_LEOPOLY_URL, leoPolyURL);
         COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_LEOPOLY_MODEL_VERSION, leoPolyModelVersion);
@@ -563,20 +559,7 @@ QScriptValue EntityItemProperties::copyToScriptValue(QScriptEngine* engine, bool
         COPY_PROPERTY_TO_QSCRIPTVALUE(PROP_LEOPOLY_TRIGGER_STATE, leoPolyTriggerState);
     }
 
-    // Sitting properties support
-    if (!skipDefaults && !strictSemantics) {
-        QScriptValue sittingPoints = engine->newObject();
-        for (int i = 0; i < _sittingPoints.size(); ++i) {
-            QScriptValue sittingPoint = engine->newObject();
-            sittingPoint.setProperty("name", _sittingPoints.at(i).name);
-            sittingPoint.setProperty("position", vec3toScriptValue(engine, _sittingPoints.at(i).position));
-            sittingPoint.setProperty("rotation", quatToScriptValue(engine, _sittingPoints.at(i).rotation));
-            sittingPoints.setProperty(i, sittingPoint);
-        }
-        sittingPoints.setProperty("length", _sittingPoints.size());
-        COPY_PROPERTY_TO_QSCRIPTVALUE_GETTER_ALWAYS(sittingPoints, sittingPoints); // gettable, but not settable
-    }
-
+ 
     if (!skipDefaults && !strictSemantics) {
         AABox aaBox = getAABox();
         QScriptValue boundingBox = engine->newObject();
@@ -770,6 +753,7 @@ void EntityItemProperties::copyFromScriptValue(const QScriptValue& object, bool 
 
     COPY_PROPERTY_FROM_QSCRIPTVALUE(flyingAllowed, bool, setFlyingAllowed);
     COPY_PROPERTY_FROM_QSCRIPTVALUE(ghostingAllowed, bool, setGhostingAllowed);
+    COPY_PROPERTY_FROM_QSCRIPTVALUE(filterURL, QString, setFilterURL);
 
     COPY_PROPERTY_FROM_QSCRIPTVALUE(clientOnly, bool, setClientOnly);
     COPY_PROPERTY_FROM_QSCRIPTVALUE(owningAvatarID, QUuid, setOwningAvatarID);
@@ -904,6 +888,7 @@ void EntityItemProperties::merge(const EntityItemProperties& other) {
 
     COPY_PROPERTY_IF_CHANGED(flyingAllowed);
     COPY_PROPERTY_IF_CHANGED(ghostingAllowed);
+    COPY_PROPERTY_IF_CHANGED(filterURL);
 
     COPY_PROPERTY_IF_CHANGED(clientOnly);
     COPY_PROPERTY_IF_CHANGED(owningAvatarID);
@@ -1094,6 +1079,7 @@ void EntityItemProperties::entityPropertyFlagsFromScriptValue(const QScriptValue
 
         ADD_PROPERTY_TO_MAP(PROP_FLYING_ALLOWED, FlyingAllowed, flyingAllowed, bool);
         ADD_PROPERTY_TO_MAP(PROP_GHOSTING_ALLOWED, GhostingAllowed, ghostingAllowed, bool);
+        ADD_PROPERTY_TO_MAP(PROP_FILTER_URL, FilterURL, filterURL, QString);
 
         ADD_PROPERTY_TO_MAP(PROP_DPI, DPI, dpi, uint16_t);
 
@@ -1348,6 +1334,7 @@ bool EntityItemProperties::encodeEntityEditPacket(PacketType command, EntityItem
 
                 APPEND_ENTITY_PROPERTY(PROP_FLYING_ALLOWED, properties.getFlyingAllowed());
                 APPEND_ENTITY_PROPERTY(PROP_GHOSTING_ALLOWED, properties.getGhostingAllowed());
+                APPEND_ENTITY_PROPERTY(PROP_FILTER_URL, properties.getFilterURL());
             }
 
             if (properties.getType() == EntityTypes::PolyVox) {
@@ -1653,6 +1640,7 @@ bool EntityItemProperties::decodeEntityEditPacket(const unsigned char* data, int
 
         READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_FLYING_ALLOWED, bool, setFlyingAllowed);
         READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_GHOSTING_ALLOWED, bool, setGhostingAllowed);
+        READ_ENTITY_PROPERTY_TO_PROPERTIES(PROP_FILTER_URL, QString, setFilterURL);
     }
 
     if (properties.getType() == EntityTypes::PolyVox) {
@@ -1864,6 +1852,7 @@ void EntityItemProperties::markAllChanged() {
 
     _flyingAllowedChanged = true;
     _ghostingAllowedChanged = true;
+    _filterURLChanged = true;
 
     _clientOnlyChanged = true;
     _owningAvatarIDChanged = true;
@@ -2206,7 +2195,9 @@ QList<QString> EntityItemProperties::listChangedProperties() {
     if (ghostingAllowedChanged()) {
         out += "ghostingAllowed";
     }
-
+    if (filterURLChanged()) {
+        out += "filterURL";
+    }
     if (dpiChanged()) {
         out += "dpi";
     }

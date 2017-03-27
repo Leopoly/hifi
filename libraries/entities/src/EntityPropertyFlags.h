@@ -190,6 +190,8 @@ enum EntityPropertyList {
     PROP_LEOPOLY_CONTROLLER_ROT,
     PROP_LEOPOLY_TRIGGER_STATE,
 
+    PROP_FILTER_URL,
+    
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     // ATTENTION: add new properties to end of list just ABOVE this line
     PROP_AFTER_LAST_ITEM,

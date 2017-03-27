@@ -97,6 +97,21 @@ void EntityMotionState::updateServerPhysicsVariables() {
     _serverActionData = _entity->getActionData();
 }
 
+void EntityMotionState::handleDeactivation() {
+    // copy _server data to entity
+    bool success;
+    _entity->setPosition(_serverPosition, success, false);
+    _entity->setOrientation(_serverRotation, success, false);
+    _entity->setVelocity(ENTITY_ITEM_ZERO_VEC3);
+    _entity->setAngularVelocity(ENTITY_ITEM_ZERO_VEC3);
+    // and also to RigidBody
+    btTransform worldTrans;
+    worldTrans.setOrigin(glmToBullet(_serverPosition));
+    worldTrans.setRotation(glmToBullet(_serverRotation));
+    _body->setWorldTransform(worldTrans);
+    // no need to update velocities... should already be zero
+}
+
 // virtual
 void EntityMotionState::handleEasyChanges(uint32_t& flags) {
     assert(entityTreeIsLocked());
@@ -111,6 +126,8 @@ void EntityMotionState::handleEasyChanges(uint32_t& flags) {
                 flags &= ~Simulation::DIRTY_PHYSICS_ACTIVATION;
                 _body->setActivationState(WANTS_DEACTIVATION);
                 _outgoingPriority = 0;
+                const float ACTIVATION_EXPIRY = 3.0f; // something larger than the 2.0 hard coded in Bullet
+                _body->setDeactivationTime(ACTIVATION_EXPIRY);
             } else {
                 // disowned object is still moving --> start timer for ownership bid
                 // TODO? put a delay in here proportional to distance from object?
@@ -199,15 +216,12 @@ void EntityMotionState::getWorldTransform(btTransform& worldTrans) const {
         return;
     }
     assert(entityTreeIsLocked());
-    if (_motionType == MOTION_TYPE_KINEMATIC) {
+    if (_motionType == MOTION_TYPE_KINEMATIC && !_entity->hasAncestorOfType(NestableType::Avatar)) {
         BT_PROFILE("kinematicIntegration");
         // This is physical kinematic motion which steps strictly by the subframe count
         // of the physics simulation and uses full gravity for acceleration.
-        if (_entity->hasAncestorOfType(NestableType::Avatar)) {
-            _entity->setAcceleration(glm::vec3(0.0f));
-        } else {
-            _entity->setAcceleration(_entity->getGravity());
-        }
+        _entity->setAcceleration(_entity->getGravity());
+
         uint32_t thisStep = ObjectMotionState::getWorldSimulationStep();
         float dt = (thisStep - _lastKinematicStep) * PHYSICS_ENGINE_FIXED_SUBSTEP;
         _entity->stepKinematicMotion(dt);
@@ -224,12 +238,9 @@ void EntityMotionState::getWorldTransform(btTransform& worldTrans) const {
 }
 
 // This callback is invoked by the physics simulation at the end of each simulation step...
-// iff the corresponding RigidBody is DYNAMIC and has moved.
+// iff the corresponding RigidBody is DYNAMIC and ACTIVE.
 void EntityMotionState::setWorldTransform(const btTransform& worldTrans) {
-    if (!_entity) {
-        return;
-    }
-
+    assert(_entity);
     assert(entityTreeIsLocked());
     measureBodyAcceleration();
     bool positionSuccess;
@@ -614,7 +625,7 @@ void EntityMotionState::sendUpdate(OctreeEditPacketSender* packetSender, uint32_
     properties.setClientOnly(_entity->getClientOnly());
     properties.setOwningAvatarID(_entity->getOwningAvatarID());
 
-    entityPacketSender->queueEditEntityMessage(PacketType::EntityEdit, tree, id, properties);
+    entityPacketSender->queueEditEntityMessage(PacketType::EntityPhysics, tree, id, properties);
     _entity->setLastBroadcast(now);
 
     // if we've moved an entity with children, check/update the queryAACube of all descendents and tell the server
@@ -630,7 +641,7 @@ void EntityMotionState::sendUpdate(OctreeEditPacketSender* packetSender, uint32_
                 newQueryCubeProperties.setClientOnly(entityDescendant->getClientOnly());
                 newQueryCubeProperties.setOwningAvatarID(entityDescendant->getOwningAvatarID());
 
-                entityPacketSender->queueEditEntityMessage(PacketType::EntityEdit, tree,
+                entityPacketSender->queueEditEntityMessage(PacketType::EntityPhysics, tree,
                                                            descendant->getID(), newQueryCubeProperties);
                 entityDescendant->setLastBroadcast(now);
             }

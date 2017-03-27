@@ -655,13 +655,11 @@ int EntityItem::readEntityDataFromBuffer(const unsigned char* data, int bytesLef
 
 
     // pack SimulationOwner and terse update properties near each other
-
     // NOTE: the server is authoritative for changes to simOwnerID so we always unpack ownership data
     // even when we would otherwise ignore the rest of the packet.
 
     bool filterRejection = false;
     if (propertyFlags.getHasProperty(PROP_SIMULATION_OWNER)) {
-
         QByteArray simOwnerData;
         int bytes = OctreePacketData::unpackDataFromBytes(dataAt, simOwnerData);
         SimulationOwner newSimOwner;
@@ -828,7 +826,7 @@ int EntityItem::readEntityDataFromBuffer(const unsigned char* data, int bytesLef
     {   // parentID and parentJointIndex are also protected by simulation ownership
         bool oldOverwrite = overwriteLocalData;
         overwriteLocalData = overwriteLocalData && !weOwnSimulation;
-        READ_ENTITY_PROPERTY(PROP_PARENT_ID, QUuid, setParentID);
+        READ_ENTITY_PROPERTY(PROP_PARENT_ID, QUuid, updateParentID);
         READ_ENTITY_PROPERTY(PROP_PARENT_JOINT_INDEX, quint16, setParentJointIndex);
         overwriteLocalData = oldOverwrite;
     }
@@ -1595,7 +1593,7 @@ void EntityItem::updatePosition(const glm::vec3& value) {
 }
 
 void EntityItem::updateParentID(const QUuid& value) {
-    if (_parentID != value) {
+    if (getParentID() != value) {
         setParentID(value);
         _dirtyFlags |= Simulation::DIRTY_MOTION_TYPE; // children are forced to be kinematic
         _dirtyFlags |= Simulation::DIRTY_COLLISION_GROUP; // may need to not collide with own avatar
@@ -1823,28 +1821,6 @@ void EntityItem::computeCollisionGroupAndFinalMask(int16_t& group, int16_t& mask
         }
 
         uint8_t userMask = getCollisionMask();
-        if (userMask & USER_COLLISION_GROUP_MY_AVATAR) {
-            // if this entity is a descendant of MyAvatar, don't collide with MyAvatar.  This avoids the
-            // "bootstrapping" problem where you can shoot yourself across the room by grabbing something
-            // and holding it against your own avatar.
-            QUuid ancestorID = findAncestorOfType(NestableType::Avatar);
-            if (!ancestorID.isNull() && ancestorID == Physics::getSessionUUID()) {
-                userMask &= ~USER_COLLISION_GROUP_MY_AVATAR;
-            }
-        }
-        if (userMask & USER_COLLISION_GROUP_MY_AVATAR) {
-            // also, don't bootstrap our own avatar with a hold action
-            QList<EntityActionPointer> holdActions = getActionsOfType(ACTION_TYPE_HOLD);
-            QList<EntityActionPointer>::const_iterator i = holdActions.begin();
-            while (i != holdActions.end()) {
-                EntityActionPointer action = *i;
-                if (action->isMine()) {
-                    userMask &= ~USER_COLLISION_GROUP_MY_AVATAR;
-                    break;
-                }
-                i++;
-            }
-        }
 
         if ((bool)(userMask & USER_COLLISION_GROUP_MY_AVATAR) !=
                 (bool)(userMask & USER_COLLISION_GROUP_OTHER_AVATAR)) {
@@ -1852,6 +1828,33 @@ void EntityItem::computeCollisionGroupAndFinalMask(int16_t& group, int16_t& mask
             if (!getSimulatorID().isNull() && getSimulatorID() != Physics::getSessionUUID()) {
                 // someone else owns the simulation, so we toggle the avatar bits (swap interpretation)
                 userMask ^= USER_COLLISION_MASK_AVATARS | ~userMask;
+            }
+        }
+
+        if (userMask & USER_COLLISION_GROUP_MY_AVATAR) {
+            bool iAmHoldingThis = false;
+            // if this entity is a descendant of MyAvatar, don't collide with MyAvatar.  This avoids the
+            // "bootstrapping" problem where you can shoot yourself across the room by grabbing something
+            // and holding it against your own avatar.
+            QUuid ancestorID = findAncestorOfType(NestableType::Avatar);
+            if (!ancestorID.isNull() &&
+                (ancestorID == Physics::getSessionUUID() || ancestorID == AVATAR_SELF_ID)) {
+                iAmHoldingThis = true;
+            }
+            // also, don't bootstrap our own avatar with a hold action
+            QList<EntityActionPointer> holdActions = getActionsOfType(ACTION_TYPE_HOLD);
+            QList<EntityActionPointer>::const_iterator i = holdActions.begin();
+            while (i != holdActions.end()) {
+                EntityActionPointer action = *i;
+                if (action->isMine()) {
+                    iAmHoldingThis = true;
+                    break;
+                }
+                i++;
+            }
+
+            if (iAmHoldingThis) {
+                userMask &= ~USER_COLLISION_GROUP_MY_AVATAR;
             }
         }
         mask = Physics::getDefaultCollisionMask(group) & (int16_t)(userMask);
@@ -1874,6 +1877,7 @@ void EntityItem::setSimulationOwner(const SimulationOwner& owner) {
 }
 
 void EntityItem::updateSimulationOwner(const SimulationOwner& owner) {
+    // NOTE: this method only used by EntityServer.  The Interface uses special code in readEntityDataFromBuffer().
     if (wantTerseEditLogging() && _simulationOwner != owner) {
         qCDebug(entities) << "sim ownership for" << getDebugName() << "is now" << owner;
     }
@@ -1889,8 +1893,9 @@ void EntityItem::clearSimulationOwnership() {
     }
 
     _simulationOwner.clear();
-    // don't bother setting the DIRTY_SIMULATOR_ID flag because clearSimulationOwnership()
-    // is only ever called on the entity-server and the flags are only used client-side
+    // don't bother setting the DIRTY_SIMULATOR_ID flag because:
+    // (a) when entity-server calls clearSimulationOwnership() the dirty-flags are meaningless (only used by interface)
+    // (b) the interface only calls clearSimulationOwnership() in a context that already knows best about dirty flags
     //_dirtyFlags |= Simulation::DIRTY_SIMULATOR_ID;
 
 }

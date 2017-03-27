@@ -11,9 +11,14 @@
 
 #include "EntityScriptServer.h"
 
+#include <mutex>
+
 #include <AudioConstants.h>
 #include <AudioInjectorManager.h>
+#include <ClientServerUtils.h>
+#include <EntityNodeData.h>
 #include <EntityScriptingInterface.h>
+#include <LogHandler.h>
 #include <MessagesClient.h>
 #include <plugins/CodecPlugin.h>
 #include <plugins/PluginManager.h>
@@ -24,17 +29,36 @@
 #include <UUID.h>
 #include <WebSocketServerClass.h>
 
-#include "ClientServerUtils.h"
+#include "EntityScriptServerLogging.h"
 #include "../entities/AssignmentParentFinder.h"
+
+using Mutex = std::mutex;
+using Lock = std::lock_guard<Mutex>;
+
+static std::mutex logBufferMutex;
+static std::string logBuffer;
+
+void messageHandler(QtMsgType type, const QMessageLogContext& context, const QString& message) {
+    auto logMessage = LogHandler::getInstance().printMessage((LogMsgType) type, context, message);
+
+    if (!logMessage.isEmpty()) {
+        Lock lock(logBufferMutex);
+        logBuffer.append(logMessage.toStdString() + '\n');
+    }
+}
 
 int EntityScriptServer::_entitiesScriptEngineCount = 0;
 
 EntityScriptServer::EntityScriptServer(ReceivedMessage& message) : ThreadedAssignment(message) {
+    qInstallMessageHandler(messageHandler);
+
     DependencyManager::get<EntityScriptingInterface>()->setPacketSender(&_entityEditSender);
 
     ResourceManager::init();
 
     DependencyManager::registerInheritance<SpatialParentFinder, AssignmentParentFinder>();
+
+    DependencyManager::set<AudioScriptingInterface>();
 
     DependencyManager::set<ResourceCacheSharedItems>();
     DependencyManager::set<SoundCache>();
@@ -57,6 +81,17 @@ EntityScriptServer::EntityScriptServer(ReceivedMessage& message) : ThreadedAssig
 
     packetReceiver.registerListener(PacketType::ReloadEntityServerScript, this, "handleReloadEntityServerScriptPacket");
     packetReceiver.registerListener(PacketType::EntityScriptGetStatus, this, "handleEntityScriptGetStatusPacket");
+    packetReceiver.registerListener(PacketType::EntityServerScriptLog, this, "handleEntityServerScriptLogPacket");
+
+    static const int LOG_INTERVAL = MSECS_PER_SECOND / 10;
+    auto timer = new QTimer(this);
+    timer->setInterval(LOG_INTERVAL);
+    connect(timer, &QTimer::timeout, this, &EntityScriptServer::pushLogs);
+    timer->start();
+}
+
+EntityScriptServer::~EntityScriptServer() {
+    qInstallMessageHandler(LogHandler::verboseMessageHandler);
 }
 
 static const QString ENTITY_SCRIPT_SERVER_LOGGING_NAME = "entity-script-server";
@@ -68,7 +103,7 @@ void EntityScriptServer::handleReloadEntityServerScriptPacket(QSharedPointer<Rec
         auto entityID = QUuid::fromRfc4122(message->read(NUM_BYTES_RFC4122_UUID));
 
         if (_entityViewer.getTree() && !_shuttingDown) {
-            qDebug() << "Reloading: " << entityID;
+            qCDebug(entity_script_server) << "Reloading: " << entityID;
             _entitiesScriptEngine->unloadEntityScript(entityID);
             checkAndCallPreload(entityID, true);
         }
@@ -100,6 +135,99 @@ void EntityScriptServer::handleEntityScriptGetStatusPacket(QSharedPointer<Receiv
     }
 }
 
+void EntityScriptServer::handleSettings() {
+
+    auto nodeList = DependencyManager::get<NodeList>();
+
+    auto& domainHandler = nodeList->getDomainHandler();
+    const QJsonObject& settingsObject = domainHandler.getSettingsObject();
+
+    static const QString ENTITY_SCRIPT_SERVER_SETTINGS_KEY = "entity_script_server";
+
+    if (!settingsObject.contains(ENTITY_SCRIPT_SERVER_SETTINGS_KEY)) {
+        qWarning() << "Received settings from the domain-server with no entity_script_server section.";
+        return;
+    }
+
+    auto entityScriptServerSettings = settingsObject[ENTITY_SCRIPT_SERVER_SETTINGS_KEY].toObject();
+
+    static const QString MAX_ENTITY_PPS_OPTION = "max_total_entity_pps";
+    static const QString ENTITY_PPS_PER_SCRIPT = "entity_pps_per_script";
+
+    if (!entityScriptServerSettings.contains(MAX_ENTITY_PPS_OPTION) || !entityScriptServerSettings.contains(ENTITY_PPS_PER_SCRIPT)) {
+        qWarning() << "Received settings from the domain-server with no max_total_entity_pps or entity_pps_per_script properties.";
+        return;
+    }
+
+    _maxEntityPPS = std::max(0, entityScriptServerSettings[MAX_ENTITY_PPS_OPTION].toInt());
+    _entityPPSPerScript = std::max(0, entityScriptServerSettings[ENTITY_PPS_PER_SCRIPT].toInt());
+
+    qDebug() << QString("Received entity script server settings, Max Entity PPS: %1, Entity PPS Per Entity Script: %2")
+                .arg(_maxEntityPPS).arg(_entityPPSPerScript);
+}
+
+void EntityScriptServer::updateEntityPPS() {
+    int numRunningScripts = _entitiesScriptEngine->getNumRunningEntityScripts();
+    int pps;
+    if (std::numeric_limits<int>::max() / _entityPPSPerScript < numRunningScripts) {
+        qWarning() << QString("Integer multiplaction would overflow, clamping to maxint: %1 * %2").arg(numRunningScripts).arg(_entityPPSPerScript);
+        pps = std::numeric_limits<int>::max();
+        pps = std::min(_maxEntityPPS, pps);
+    } else {
+        pps = _entityPPSPerScript * numRunningScripts;
+        pps = std::min(_maxEntityPPS, pps);
+    }
+    _entityEditSender.setPacketsPerSecond(pps);
+    qDebug() << QString("Updating entity PPS to: %1 @ %2 PPS per script = %3 PPS").arg(numRunningScripts).arg(_entityPPSPerScript).arg(pps);
+}
+
+void EntityScriptServer::handleEntityServerScriptLogPacket(QSharedPointer<ReceivedMessage> message, SharedNodePointer senderNode) {
+    // These are temporary checks until we can ensure that nodes eventually disconnect if the Domain Server stops telling them
+    // about each other.
+    bool enable = false;
+    message->readPrimitive(&enable);
+
+    auto senderUUID = senderNode->getUUID();
+    auto it = _logListeners.find(senderUUID);
+
+    if (enable && senderNode->getCanRez()) {
+        if (it == std::end(_logListeners)) {
+            _logListeners.insert(senderUUID);
+            qCInfo(entity_script_server) << "Node" << senderUUID << "subscribed to log stream";
+        }
+    } else {
+        if (it != std::end(_logListeners)) {
+            _logListeners.erase(it);
+            qCInfo(entity_script_server) << "Node" << senderUUID << "unsubscribed from log stream";
+        }
+    }
+}
+
+void EntityScriptServer::pushLogs() {
+    std::string buffer;
+    {
+        Lock lock(logBufferMutex);
+        std::swap(logBuffer, buffer);
+    }
+
+    if (buffer.empty()) {
+        return;
+    }
+    if (_logListeners.empty()) {
+        return;
+    }
+
+    auto nodeList = DependencyManager::get<NodeList>();
+    for (auto uuid : _logListeners) {
+        auto node = nodeList->nodeWithUUID(uuid);
+        if (node && node->getActiveSocket()) {
+            auto packet = NLPacketList::create(PacketType::EntityServerScriptLog, QByteArray(), true, true);
+            packet->write(buffer.data(), buffer.size());
+            nodeList->sendPacketList(std::move(packet), *node);
+        }
+    }
+}
+
 void EntityScriptServer::run() {
     // make sure we request our script once the agent connects to the domain
     auto nodeList = DependencyManager::get<NodeList>();
@@ -113,6 +241,9 @@ void EntityScriptServer::run() {
     messagesClient->moveToThread(messagesThread);
     connect(messagesThread, &QThread::started, messagesClient.data(), &MessagesClient::init);
     messagesThread->start();
+
+    DomainHandler& domainHandler = DependencyManager::get<NodeList>()->getDomainHandler();
+    connect(&domainHandler, &DomainHandler::settingsReceived, this, &EntityScriptServer::handleSettings);
 
     // make sure we hear about connected nodes so we can grab an ATP script if a request is pending
     connect(nodeList.data(), &LimitedNodeList::nodeActivated, this, &EntityScriptServer::nodeActivated);
@@ -136,8 +267,14 @@ void EntityScriptServer::run() {
     
     // setup the JSON filter that asks for entities with a non-default serverScripts property
     QJsonObject queryJSONParameters;
-    static const QString SERVER_SCRIPTS_PROPERTY = "serverScripts";
-    queryJSONParameters[SERVER_SCRIPTS_PROPERTY] = EntityQueryFilterSymbol::NonDefault;
+    queryJSONParameters[EntityJSONQueryProperties::SERVER_SCRIPTS_PROPERTY] = EntityQueryFilterSymbol::NonDefault;
+
+    QJsonObject queryFlags;
+
+    queryFlags[EntityJSONQueryProperties::INCLUDE_ANCESTORS_PROPERTY] = true;
+    queryFlags[EntityJSONQueryProperties::INCLUDE_DESCENDANTS_PROPERTY] = true;
+
+    queryJSONParameters[EntityJSONQueryProperties::FLAGS_PROPERTY] = queryFlags;
     
     // setup the JSON parameters so that OctreeQuery does not use a frustum and uses our JSON filter
     _entityViewer.getOctreeQuery().setUsesFrustum(false);
@@ -154,9 +291,78 @@ void EntityScriptServer::run() {
     connect(tree, &EntityTree::entityServerScriptChanging, this, &EntityScriptServer::entityServerScriptChanging, Qt::QueuedConnection);
 }
 
+void EntityScriptServer::cleanupOldKilledListeners() {
+    auto threshold = usecTimestampNow() - 5 * USECS_PER_SECOND;
+    using ValueType = std::pair<QUuid, quint64>;
+    auto it = std::remove_if(std::begin(_killedListeners), std::end(_killedListeners), [&](ValueType value) {
+        return value.second < threshold;
+    });
+    _killedListeners.erase(it, std::end(_killedListeners));
+}
+
 void EntityScriptServer::nodeActivated(SharedNodePointer activatedNode) {
-    if (activatedNode->getType() == NodeType::AudioMixer) {
-        negotiateAudioFormat();
+    switch (activatedNode->getType()) {
+        case NodeType::AudioMixer:
+            negotiateAudioFormat();
+            break;
+        case NodeType::Agent: {
+            auto activatedNodeUUID = activatedNode->getUUID();
+            using ValueType = std::pair<QUuid, quint64>;
+            auto it = std::find_if(std::begin(_killedListeners), std::end(_killedListeners), [&](ValueType value) {
+                return value.first == activatedNodeUUID;
+            });
+            if (it != std::end(_killedListeners)) {
+                _killedListeners.erase(it);
+                _logListeners.insert(activatedNodeUUID);
+            }
+            break;
+        }
+        default:
+            // Do nothing
+            break;
+    }
+}
+
+void EntityScriptServer::nodeKilled(SharedNodePointer killedNode) {
+    switch (killedNode->getType()) {
+        case NodeType::EntityServer: {
+            // Before we clear, make sure this was our only entity server.
+            // Otherwise we're assuming that we have "trading" entity servers
+            // (an old one going away and a new one coming onboard)
+            // and that we shouldn't clear here because we're still doing work.
+            bool hasAnotherEntityServer = false;
+            auto nodeList = DependencyManager::get<NodeList>();
+
+            nodeList->eachNodeBreakable([&hasAnotherEntityServer, &killedNode](const SharedNodePointer& node){
+                if (node->getType() == NodeType::EntityServer && node->getUUID() != killedNode->getUUID()) {
+                    // we're talking to > 1 entity servers, we know we won't clear
+                    hasAnotherEntityServer = true;
+                    return false;
+                }
+
+                return true;
+            });
+
+            if (!hasAnotherEntityServer) {
+                clear();
+            }
+            
+            break;
+        }
+        case NodeType::Agent: {
+            cleanupOldKilledListeners();
+
+            auto killedNodeUUID = killedNode->getUUID();
+            auto it = _logListeners.find(killedNodeUUID);
+            if (it != std::end(_logListeners)) {
+                _logListeners.erase(killedNodeUUID);
+                _killedListeners.emplace_back(killedNodeUUID, usecTimestampNow());
+            }
+            break;
+        }
+        default:
+            // Do nothing
+            break;
     }
 }
 
@@ -188,7 +394,7 @@ void EntityScriptServer::handleSelectedAudioFormat(QSharedPointer<ReceivedMessag
 void EntityScriptServer::selectAudioFormat(const QString& selectedCodecName) {
     _selectedCodecName = selectedCodecName;
 
-    qDebug() << "Selected Codec:" << _selectedCodecName;
+    qCDebug(entity_script_server) << "Selected Codec:" << _selectedCodecName;
 
     // release any old codec encoder/decoder first...
     if (_codec && _encoder) {
@@ -202,15 +408,16 @@ void EntityScriptServer::selectAudioFormat(const QString& selectedCodecName) {
         if (_selectedCodecName == plugin->getName()) {
             _codec = plugin;
             _encoder = plugin->createEncoder(AudioConstants::SAMPLE_RATE, AudioConstants::MONO);
-            qDebug() << "Selected Codec Plugin:" << _codec.get();
+            qCDebug(entity_script_server) << "Selected Codec Plugin:" << _codec.get();
             break;
         }
     }
 }
 
 void EntityScriptServer::resetEntitiesScriptEngine() {
-    auto engineName = QString("Entities %1").arg(++_entitiesScriptEngineCount);
-    auto newEngine = QSharedPointer<ScriptEngine>(new ScriptEngine(ScriptEngine::ENTITY_SERVER_SCRIPT, NO_SCRIPT, engineName));
+    auto engineName = QString("about:Entities %1").arg(++_entitiesScriptEngineCount);
+    auto newEngine = QSharedPointer<ScriptEngine>(new ScriptEngine(ScriptEngine::ENTITY_SERVER_SCRIPT, NO_SCRIPT, engineName),
+                                                  &ScriptEngine::deleteLater);
 
     auto webSocketServerConstructorValue = newEngine->newFunction(WebSocketServerClass::constructor);
     newEngine->globalObject().setProperty("WebSocketServer", webSocketServerConstructorValue);
@@ -226,13 +433,16 @@ void EntityScriptServer::resetEntitiesScriptEngine() {
 
     connect(newEngine.data(), &ScriptEngine::update, this, [this] {
         _entityViewer.queryOctree();
+        _entityViewer.getTree()->update();
     });
 
 
     newEngine->runInThread();
     DependencyManager::get<EntityScriptingInterface>()->setEntitiesScriptEngine(newEngine.data());
 
+    disconnect(_entitiesScriptEngine.data(), &ScriptEngine::entityScriptDetailsUpdated, this, &EntityScriptServer::updateEntityPPS);
     _entitiesScriptEngine.swap(newEngine);
+    connect(_entitiesScriptEngine.data(), &ScriptEngine::entityScriptDetailsUpdated, this, &EntityScriptServer::updateEntityPPS);
 }
 
 
@@ -244,12 +454,12 @@ void EntityScriptServer::clear() {
         _entitiesScriptEngine->stop();
     }
 
+    _entityViewer.clear();
+
     // reset the engine
     if (!_shuttingDown) {
         resetEntitiesScriptEngine();
     }
-
-    _entityViewer.clear();
 }
 
 void EntityScriptServer::shutdownScriptEngine() {
@@ -267,13 +477,13 @@ void EntityScriptServer::addingEntity(const EntityItemID& entityID) {
 
 void EntityScriptServer::deletingEntity(const EntityItemID& entityID) {
     if (_entityViewer.getTree() && !_shuttingDown && _entitiesScriptEngine) {
-        _entitiesScriptEngine->unloadEntityScript(entityID);
+        _entitiesScriptEngine->unloadEntityScript(entityID, true);
     }
 }
 
 void EntityScriptServer::entityServerScriptChanging(const EntityItemID& entityID, const bool reload) {
     if (_entityViewer.getTree() && !_shuttingDown) {
-        _entitiesScriptEngine->unloadEntityScript(entityID);
+        _entitiesScriptEngine->unloadEntityScript(entityID, true);
         checkAndCallPreload(entityID, reload);
     }
 }
@@ -288,23 +498,10 @@ void EntityScriptServer::checkAndCallPreload(const EntityItemID& entityID, const
             QString scriptUrl = entity->getServerScripts();
             if (!scriptUrl.isEmpty()) {
                 scriptUrl = ResourceManager::normalizeURL(scriptUrl);
-                qDebug() << "Loading entity server script" << scriptUrl << "for" << entityID;
-                ScriptEngine::loadEntityScript(_entitiesScriptEngine, entityID, scriptUrl, reload);
+                qCDebug(entity_script_server) << "Loading entity server script" << scriptUrl << "for" << entityID;
+                _entitiesScriptEngine->loadEntityScript(entityID, scriptUrl, reload);
             }
         }
-    }
-}
-
-void EntityScriptServer::nodeKilled(SharedNodePointer killedNode) {
-    if (!_shuttingDown && killedNode->getType() == NodeType::EntityServer) {
-        if (_entitiesScriptEngine) {
-            _entitiesScriptEngine->unloadAllEntityScripts();
-            _entitiesScriptEngine->stop();
-        }
-
-        resetEntitiesScriptEngine();
-
-        _entityViewer.clear();
     }
 }
 
