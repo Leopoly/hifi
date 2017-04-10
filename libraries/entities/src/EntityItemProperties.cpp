@@ -336,9 +336,9 @@ EntityPropertyFlags EntityItemProperties::getChangedProperties() const {
 
     CHECK_PROPERTY_CHANGE(PROP_SHAPE, shape);
     CHECK_PROPERTY_CHANGE(PROP_DPI, dpi);
+    
     CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_URL, leoPolyURL);
     CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_MODEL_VERSION, leoPolyModelVersion);
-
     CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_CONTROLLER_POS, leoPolyControllerPos);
     CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_CONTROLLER_ROT, leoPolyControllerRot);
     CHECK_PROPERTY_CHANGE(PROP_LEOPOLY_TRIGGER_STATE, leoPolyTriggerState);
@@ -1372,6 +1372,12 @@ bool EntityItemProperties::encodeEntityEditPacket(PacketType command, EntityItem
                 APPEND_ENTITY_PROPERTY(PROP_SHAPE, properties.getShape());
             }
 
+            APPEND_ENTITY_PROPERTY(PROP_MARKETPLACE_ID, properties.getMarketplaceID());
+            APPEND_ENTITY_PROPERTY(PROP_NAME, properties.getName());
+            APPEND_ENTITY_PROPERTY(PROP_COLLISION_SOUND_URL, properties.getCollisionSoundURL());
+            APPEND_ENTITY_PROPERTY(PROP_ACTION_DATA, properties.getActionData());
+            APPEND_ENTITY_PROPERTY(PROP_ALPHA, properties.getAlpha());
+
             if (properties.getType() == EntityTypes::LeoPoly) {
                 APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_URL, properties.getLeoPolyURL());
                 APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_MODEL_VERSION, properties.getLeoPolyModelVersion());
@@ -1379,14 +1385,6 @@ bool EntityItemProperties::encodeEntityEditPacket(PacketType command, EntityItem
                 APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_CONTROLLER_ROT, properties.getLeoPolyControllerRot());
                 APPEND_ENTITY_PROPERTY(PROP_LEOPOLY_TRIGGER_STATE, properties.getLeoPolyTriggerState());
             }
-
-            APPEND_ENTITY_PROPERTY(PROP_MARKETPLACE_ID, properties.getMarketplaceID());
-            APPEND_ENTITY_PROPERTY(PROP_NAME, properties.getName());
-            APPEND_ENTITY_PROPERTY(PROP_COLLISION_SOUND_URL, properties.getCollisionSoundURL());
-            APPEND_ENTITY_PROPERTY(PROP_ACTION_DATA, properties.getActionData());
-            APPEND_ENTITY_PROPERTY(PROP_ALPHA, properties.getAlpha());
-
-           
         }
 
         if (propertyCount > 0) {

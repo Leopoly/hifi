@@ -224,10 +224,11 @@ public:
     DEFINE_PROPERTY_REF(PROP_DPI, DPI, dpi, uint16_t, ENTITY_ITEM_DEFAULT_DPI);
 
     DEFINE_PROPERTY_REF(PROP_LAST_EDITED_BY, LastEditedBy, lastEditedBy, QUuid, ENTITY_ITEM_DEFAULT_LAST_EDITED_BY);
-    DEFINE_PROPERTY_REF(PROP_LEOPOLY_URL, LeoPolyURL, leoPolyURL, QString, LeoPolyEntityItem::DEFAULT_LEOPOLY_URL);
-    DEFINE_PROPERTY_REF(PROP_LEOPOLY_MODEL_VERSION, LeoPolyModelVersion, leoPolyModelVersion, QUuid, LeoPolyEntityItem::DEFAULT_LEOPOLY_MODEL_VERSION);
 
     DEFINE_PROPERTY_REF(PROP_SERVER_SCRIPTS, ServerScripts, serverScripts, QString, ENTITY_ITEM_DEFAULT_SERVER_SCRIPTS);
+    
+    DEFINE_PROPERTY_REF(PROP_LEOPOLY_URL, LeoPolyURL, leoPolyURL, QString, LeoPolyEntityItem::DEFAULT_LEOPOLY_URL);
+    DEFINE_PROPERTY_REF(PROP_LEOPOLY_MODEL_VERSION, LeoPolyModelVersion, leoPolyModelVersion, QUuid, LeoPolyEntityItem::DEFAULT_LEOPOLY_MODEL_VERSION);
     DEFINE_PROPERTY_REF(PROP_LEOPOLY_CONTROLLER_POS, LeoPolyControllerPos, leoPolyControllerPos, glm::vec3, glm::vec3());
     DEFINE_PROPERTY_REF(PROP_LEOPOLY_CONTROLLER_ROT, LeoPolyControllerRot, leoPolyControllerRot, glm::quat, glm::quat());
     DEFINE_PROPERTY_REF(PROP_LEOPOLY_TRIGGER_STATE, LeoPolyTriggerState, leoPolyTriggerState, float, 0.0f);
@@ -367,8 +368,6 @@ inline QDebug operator<<(QDebug debug, const EntityItemProperties& properties) {
         debug << "  position:" << properties.getPosition() << "in meters" << "\n";
     }
 
-    DEBUG_PROPERTY_IF_CHANGED(debug, properties, LeoPolyURL, leoPolyURL, "");
-    DEBUG_PROPERTY_IF_CHANGED(debug, properties, LeoPolyModelVersion, leoPolyModelVersion, "");
     DEBUG_PROPERTY_IF_CHANGED(debug, properties, Dimensions, dimensions, "in meters");
     DEBUG_PROPERTY_IF_CHANGED(debug, properties, Velocity, velocity, "in meters");
     DEBUG_PROPERTY_IF_CHANGED(debug, properties, Name, name, "");
@@ -470,6 +469,9 @@ inline QDebug operator<<(QDebug debug, const EntityItemProperties& properties) {
     DEBUG_PROPERTY_IF_CHANGED(debug, properties, OwningAvatarID, owningAvatarID, "");
 
     DEBUG_PROPERTY_IF_CHANGED(debug, properties, LastEditedBy, lastEditedBy, "");
+
+    DEBUG_PROPERTY_IF_CHANGED(debug, properties, LeoPolyURL, leoPolyURL, "");
+    DEBUG_PROPERTY_IF_CHANGED(debug, properties, LeoPolyModelVersion, leoPolyModelVersion, "");
 
     debug << "  last edited:" << properties.getLastEdited() << "\n";
     debug << "  edited ago:" << properties.getEditedAgo() << "\n";
