@@ -22,7 +22,7 @@ KTXCache::KTXCache(const std::string& dir, const std::string& ext) :
 }
 
 KTXFilePointer KTXCache::writeFile(const char* data, Metadata&& metadata) {
-    FilePointer file = FileCache::writeFile(data, std::move(metadata));
+    FilePointer file = FileCache::writeFile(data, std::move(metadata), true);
     return std::static_pointer_cast<KTXFile>(file);
 }
 
@@ -38,10 +38,3 @@ std::unique_ptr<File> KTXCache::createFile(Metadata&& metadata, const std::strin
 KTXFile::KTXFile(Metadata&& metadata, const std::string& filepath) :
     cache::File(std::move(metadata), filepath) {}
 
-std::unique_ptr<ktx::KTX> KTXFile::getKTX() const {
-    ktx::StoragePointer storage = std::make_shared<storage::FileStorage>(getFilepath().c_str());
-    if (*storage) {
-        return ktx::KTX::create(storage);
-    }
-    return {};
-}

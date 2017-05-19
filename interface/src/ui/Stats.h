@@ -81,6 +81,7 @@ class Stats : public QQuickItem {
     STATS_PROPERTY(int, audioSilentOutboundPPS, 0)
     STATS_PROPERTY(int, audioAudioInboundPPS, 0)
     STATS_PROPERTY(int, audioSilentInboundPPS, 0)
+    STATS_PROPERTY(int, audioPacketLoss, 0)
     STATS_PROPERTY(QString, audioCodec, QString())
     STATS_PROPERTY(QString, audioNoiseGate, QString())
 
@@ -88,6 +89,8 @@ class Stats : public QQuickItem {
     STATS_PROPERTY(int, downloadLimit, 0)
     STATS_PROPERTY(int, downloadsPending, 0)
     Q_PROPERTY(QStringList downloadUrls READ downloadUrls NOTIFY downloadUrlsChanged)
+    STATS_PROPERTY(int, processing, 0)
+    STATS_PROPERTY(int, processingPending, 0)
     STATS_PROPERTY(int, triangles, 0)
     STATS_PROPERTY(int, quads, 0)
     STATS_PROPERTY(int, materialSwitches, 0)
@@ -127,6 +130,7 @@ class Stats : public QQuickItem {
     STATS_PROPERTY(int, gpuFreeMemory, 0)
     STATS_PROPERTY(float, gpuFrameTime, 0)
     STATS_PROPERTY(float, batchFrameTime, 0)
+    STATS_PROPERTY(float, engineFrameTime, 0)
     STATS_PROPERTY(float, avatarSimulationTime, 0)
 
 public:
@@ -204,6 +208,7 @@ signals:
     void audioSilentOutboundPPSChanged();
     void audioAudioInboundPPSChanged();
     void audioSilentInboundPPSChanged();
+    void audioPacketLossChanged();
     void audioCodecChanged();
     void audioNoiseGateChanged();
 
@@ -211,6 +216,8 @@ signals:
     void downloadLimitChanged();
     void downloadsPendingChanged();
     void downloadUrlsChanged();
+    void processingChanged();
+    void processingPendingChanged();
     void trianglesChanged();
     void quadsChanged();
     void materialSwitchesChanged();
@@ -248,6 +255,7 @@ signals:
     void gpuFreeMemoryChanged();
     void gpuFrameTimeChanged();
     void batchFrameTimeChanged();
+    void engineFrameTimeChanged();
     void avatarSimulationTimeChanged();
     void rectifiedTextureCountChanged();
     void decimatedTextureCountChanged();
@@ -263,4 +271,3 @@ private:
 };
 
 #endif // hifi_Stats_h
-

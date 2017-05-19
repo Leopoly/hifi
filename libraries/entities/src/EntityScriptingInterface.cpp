@@ -21,10 +21,11 @@
 #include <VariantMapToScriptValue.h>
 #include <SharedUtil.h>
 #include <SpatialParentFinder.h>
+#include <model-networking/MeshProxy.h>
 
 #include "EntitiesLogging.h"
-#include "EntityActionFactoryInterface.h"
-#include "EntityActionInterface.h"
+#include "EntityDynamicFactoryInterface.h"
+#include "EntityDynamicInterface.h"
 #include "EntitySimulation.h"
 #include "EntityTree.h"
 #include "LightEntityItem.h"
@@ -408,9 +409,11 @@ QUuid EntityScriptingInterface::editEntity(QUuid id, const EntityItemProperties&
     //     return QUuid();
     // }
 
+    bool entityFound { false };
     _entityTree->withReadLock([&] {
         EntityItemPointer entity = _entityTree->findEntityByEntityItemID(entityID);
         if (entity) {
+            entityFound = true;
             // make sure the properties has a type, so that the encode can know which properties to include
             properties.setType(entity->getType());
             bool hasTerseUpdateChanges = properties.hasTerseUpdateChanges();
@@ -465,7 +468,27 @@ QUuid EntityScriptingInterface::editEntity(QUuid id, const EntityItemProperties&
             });
         }
     });
-
+    if (!entityFound) {
+        // we've made an edit to an entity we don't know about, or to a non-entity.  If it's a known non-entity,
+        // print a warning and don't send an edit packet to the entity-server.
+        QSharedPointer<SpatialParentFinder> parentFinder = DependencyManager::get<SpatialParentFinder>();
+        if (parentFinder) {
+            bool success;
+            auto nestableWP = parentFinder->find(id, success, static_cast<SpatialParentTree*>(_entityTree.get()));
+            if (success) {
+                auto nestable = nestableWP.lock();
+                if (nestable) {
+                    NestableType nestableType = nestable->getNestableType();
+                    if (nestableType == NestableType::Overlay || nestableType == NestableType::Avatar) {
+                        qCWarning(entities) << "attempted edit on non-entity: " << id << nestable->getName();
+                        return QUuid(); // null UUID to indicate failure
+                    }
+                }
+            }
+        }
+    }
+    // we queue edit packets even if we don't know about the entity.  This is to allow AC agents
+    // to edit entities they know only by ID.
     queueEntityMessage(PacketType::EntityEdit, entityID, properties);
     return id;
 }
@@ -641,6 +664,25 @@ QVector<QUuid> EntityScriptingInterface::findEntitiesInFrustum(QVariantMap frust
     return result;
 }
 
+QVector<QUuid> EntityScriptingInterface::findEntitiesByType(const QString entityType, const glm::vec3& center, float radius) const {
+	EntityTypes::EntityType type = EntityTypes::getEntityTypeFromName(entityType);
+
+	QVector<QUuid> result;
+	if (_entityTree) {
+		QVector<EntityItemPointer> entities;
+		_entityTree->withReadLock([&] {
+			_entityTree->findEntities(center, radius, entities);
+		});
+
+		foreach(EntityItemPointer entity, entities) {
+			if (entity->getType() == type) {
+				result << entity->getEntityItemID();
+			}
+		}
+	}
+	return result;
+}
+
 RayToEntityIntersectionResult EntityScriptingInterface::findRayIntersection(const PickRay& ray, bool precisionPicking, 
                 const QScriptValue& entityIdsToInclude, const QScriptValue& entityIdsToDiscard, bool visibleOnly, bool collidableOnly) {
     PROFILE_RANGE(script_entities, __FUNCTION__);
@@ -676,7 +718,6 @@ RayToEntityIntersectionResult EntityScriptingInterface::findRayIntersectionWorke
             (void**)&intersectedEntity, lockType, &result.accurate);
         if (result.intersects && intersectedEntity) {
             result.entityID = intersectedEntity->getEntityItemID();
-            result.properties = intersectedEntity->getProperties();
             result.intersection = ray.origin + (ray.direction * result.distance);
         }
     }
@@ -841,7 +882,6 @@ RayToEntityIntersectionResult::RayToEntityIntersectionResult() :
     intersects(false),
     accurate(true), // assume it's accurate
     entityID(),
-    properties(),
     distance(0),
     face(),
     entity(NULL)
@@ -856,9 +896,6 @@ QScriptValue RayToEntityIntersectionResultToScriptValue(QScriptEngine* engine, c
     obj.setProperty("accurate", value.accurate);
     QScriptValue entityItemValue = EntityItemIDtoScriptValue(engine, value.entityID);
     obj.setProperty("entityID", entityItemValue);
-
-    QScriptValue propertiesValue = EntityItemPropertiesToScriptValue(engine, value.properties);
-    obj.setProperty("properties", propertiesValue);
 
     obj.setProperty("distance", value.distance);
 
@@ -905,10 +942,6 @@ void RayToEntityIntersectionResultFromScriptValue(const QScriptValue& object, Ra
     QScriptValue entityIDValue = object.property("entityID");
     // EntityItemIDfromScriptValue(entityIDValue, value.entityID);
     quuidFromScriptValue(entityIDValue, value.entityID);
-    QScriptValue entityPropertiesValue = object.property("properties");
-    if (entityPropertiesValue.isValid()) {
-        EntityItemPropertiesFromScriptValueHonorReadOnly(entityPropertiesValue, value.properties);
-    }
     value.distance = object.property("distance").toVariant().toFloat();
 
     QString faceName = object.property("face").toVariant().toString();
@@ -1043,25 +1076,6 @@ bool EntityScriptingInterface::setVoxelsInCuboid(QUuid entityID, const glm::vec3
     });
 }
 
-void EntityScriptingInterface::voxelsToMesh(QUuid entityID, QScriptValue callback) {
-    PROFILE_RANGE(script_entities, __FUNCTION__);
-
-    bool success { false };
-    QScriptValue mesh { false };
-
-    polyVoxWorker(entityID, [&](PolyVoxEntityItem& polyVoxEntity) mutable {
-        if (polyVoxEntity.getOnCount() == 0) {
-            success = true;
-        } else {
-            success = polyVoxEntity.getMeshAsScriptValue(callback.engine(), mesh);
-        }
-        return true;
-    });
-
-    QScriptValueList args { mesh, success };
-    callback.call(QScriptValue(), args);
-}
-
 bool EntityScriptingInterface::setAllPoints(QUuid entityID, const QVector<glm::vec3>& points) {
     PROFILE_RANGE(script_entities, __FUNCTION__);
 
@@ -1163,7 +1177,7 @@ QUuid EntityScriptingInterface::addAction(const QString& actionTypeString,
     PROFILE_RANGE(script_entities, __FUNCTION__);
 
     QUuid actionID = QUuid::createUuid();
-    auto actionFactory = DependencyManager::get<EntityActionFactoryInterface>();
+    auto actionFactory = DependencyManager::get<EntityDynamicFactoryInterface>();
     bool success = false;
     actionWorker(entityID, [&](EntitySimulationPointer simulation, EntityItemPointer entity) {
         // create this action even if the entity doesn't have physics info.  it will often be the
@@ -1172,11 +1186,11 @@ QUuid EntityScriptingInterface::addAction(const QString& actionTypeString,
         // if (!entity->getPhysicsInfo()) {
         //     return false;
         // }
-        EntityActionType actionType = EntityActionInterface::actionTypeFromString(actionTypeString);
-        if (actionType == ACTION_TYPE_NONE) {
+        EntityDynamicType dynamicType = EntityDynamicInterface::dynamicTypeFromString(actionTypeString);
+        if (dynamicType == DYNAMIC_TYPE_NONE) {
             return false;
         }
-        EntityActionPointer action = actionFactory->factory(actionType, actionID, entity, arguments);
+        EntityDynamicPointer action = actionFactory->factory(dynamicType, actionID, entity, arguments);
         if (!action) {
             return false;
         }
@@ -1545,6 +1559,24 @@ bool EntityScriptingInterface::isChildOfParent(QUuid childID, QUuid parentID) {
     return isChild;
 }
 
+QString EntityScriptingInterface::getNestableType(QUuid id) {
+    QSharedPointer<SpatialParentFinder> parentFinder = DependencyManager::get<SpatialParentFinder>();
+    if (!parentFinder) {
+        return "unknown";
+    }
+    bool success;
+    SpatiallyNestableWeakPointer objectWP = parentFinder->find(id, success);
+    if (!success) {
+        return "unknown";
+    }
+    SpatiallyNestablePointer object = objectWP.lock();
+    if (!object) {
+        return "unknown";
+    }
+    NestableType nestableType = object->getNestableType();
+    return SpatiallyNestable::nestableTypeToString(nestableType);
+}
+
 QVector<QUuid> EntityScriptingInterface::getChildrenIDsOfJoint(const QUuid& parentID, int jointIndex) {
     QVector<QUuid> result;
     if (!_entityTree) {
@@ -1749,6 +1781,30 @@ bool EntityScriptingInterface::AABoxIntersectsCapsule(const glm::vec3& low, cons
     return aaBox.findCapsulePenetration(start, end, radius, penetration);
 }
 
+void EntityScriptingInterface::getMeshes(QUuid entityID, QScriptValue callback) {
+    PROFILE_RANGE(script_entities, __FUNCTION__);
+
+    EntityItemPointer entity = static_cast<EntityItemPointer>(_entityTree->findEntityByEntityItemID(entityID));
+    if (!entity) {
+        qCDebug(entities) << "EntityScriptingInterface::getMeshes no entity with ID" << entityID;
+        QScriptValueList args { callback.engine()->undefinedValue(), false };
+        callback.call(QScriptValue(), args);
+        return;
+    }
+
+    MeshProxyList result;
+    bool success = entity->getMeshes(result);
+
+    if (success) {
+        QScriptValue resultAsScriptValue = meshesToScriptValue(callback.engine(), result);
+        QScriptValueList args { resultAsScriptValue, true };
+        callback.call(QScriptValue(), args);
+    } else {
+        QScriptValueList args { callback.engine()->undefinedValue(), false };
+        callback.call(QScriptValue(), args);
+    }
+}
+
 glm::mat4 EntityScriptingInterface::getEntityTransform(const QUuid& entityID) {
     glm::mat4 result;
     if (_entityTree) {
@@ -1757,6 +1813,23 @@ glm::mat4 EntityScriptingInterface::getEntityTransform(const QUuid& entityID) {
             if (entity) {
                 glm::mat4 translation = glm::translate(entity->getPosition());
                 glm::mat4 rotation = glm::mat4_cast(entity->getRotation());
+                glm::mat4 registration = glm::translate(ENTITY_ITEM_DEFAULT_REGISTRATION_POINT -
+                                                        entity->getRegistrationPoint());
+                result = translation * rotation * registration;
+            }
+        });
+    }
+    return result;
+}
+
+glm::mat4 EntityScriptingInterface::getEntityLocalTransform(const QUuid& entityID) {
+    glm::mat4 result;
+    if (_entityTree) {
+        _entityTree->withReadLock([&] {
+            EntityItemPointer entity = _entityTree->findEntityByEntityItemID(EntityItemID(entityID));
+            if (entity) {
+                glm::mat4 translation = glm::translate(entity->getLocalPosition());
+                glm::mat4 rotation = glm::mat4_cast(entity->getLocalOrientation());
                 glm::mat4 registration = glm::translate(ENTITY_ITEM_DEFAULT_REGISTRATION_POINT -
                                                         entity->getRegistrationPoint());
                 result = translation * rotation * registration;

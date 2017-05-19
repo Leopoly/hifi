@@ -51,6 +51,11 @@ namespace controller {
 
             makePosePair(Action::LEFT_HAND, "LeftHand"),
             makePosePair(Action::RIGHT_HAND, "RightHand"),
+            makePosePair(Action::LEFT_FOOT, "LeftFoot"),
+            makePosePair(Action::RIGHT_FOOT, "RightFoot"),
+            makePosePair(Action::HIPS, "Hips"),
+            makePosePair(Action::SPINE2, "Spine2"),
+            makePosePair(Action::HEAD, "Head"),
 
             makeButtonPair(Action::LEFT_HAND_CLICK, "LeftHandClick"),
             makeButtonPair(Action::RIGHT_HAND_CLICK, "RightHandClick"),

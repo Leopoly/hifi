@@ -343,7 +343,8 @@ Grabber.prototype.pressEvent = function(event) {
         return;
     }
 
-    if (!pickResults.properties.dynamic) {
+    var isDynamic = Entities.getEntityProperties(pickResults.entityID, "dynamic").dynamic;
+    if (!isDynamic) {
         // only grab dynamic objects
         return;
     }
@@ -446,6 +447,10 @@ Grabber.prototype.moveEvent = function(event) {
 
     // see if something added/restored gravity
     var entityProperties = Entities.getEntityProperties(this.entityID);
+    if (!entityProperties || !entityProperties.gravity) {
+        return;
+    }
+
     if (Vec3.length(entityProperties.gravity) !== 0.0) {
         this.originalGravity = entityProperties.gravity;
     }
@@ -528,7 +533,7 @@ Grabber.prototype.moveEvent = function(event) {
 
     if (!this.actionID) {
         if (!entityIsGrabbedByOther(this.entityID)) {
-            this.actionID = Entities.addAction("spring", this.entityID, actionArgs);
+            this.actionID = Entities.addAction("far-grab", this.entityID, actionArgs);
         }
     } else {
         Entities.updateAction(this.entityID, this.actionID, actionArgs);

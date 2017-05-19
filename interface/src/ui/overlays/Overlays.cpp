@@ -78,7 +78,7 @@ void Overlays::update(float deltatime) {
 void Overlays::cleanupOverlaysToDelete() {
     if (!_overlaysToDelete.isEmpty()) {
         render::ScenePointer scene = qApp->getMain3DScene();
-        render::PendingChanges pendingChanges;
+        render::Transaction transaction;
 
         {
             QWriteLocker lock(&_deleteLock);
@@ -88,13 +88,13 @@ void Overlays::cleanupOverlaysToDelete() {
 
                 auto itemID = overlay->getRenderItemID();
                 if (render::Item::isValidID(itemID)) {
-                    overlay->removeFromScene(overlay, scene, pendingChanges);
+                    overlay->removeFromScene(overlay, scene, transaction);
                 }
             } while (!_overlaysToDelete.isEmpty());
         }
 
-        if (pendingChanges._removedItems.size() > 0) {
-            scene->enqueuePendingChanges(pendingChanges);
+        if (transaction._removedItems.size() > 0) {
+            scene->enqueueTransaction(transaction);
         }
     }
 }
@@ -197,9 +197,9 @@ OverlayID Overlays::addOverlay(Overlay::Pointer overlay) {
         _overlaysWorld[thisID] = overlay;
 
         render::ScenePointer scene = qApp->getMain3DScene();
-        render::PendingChanges pendingChanges;
-        overlay->addToScene(overlay, scene, pendingChanges);
-        scene->enqueuePendingChanges(pendingChanges);
+        render::Transaction transaction;
+        overlay->addToScene(overlay, scene, transaction);
+        scene->enqueueTransaction(transaction);
     } else {
         _overlaysHUD[thisID] = overlay;
     }
@@ -408,6 +408,7 @@ RayToOverlayIntersectionResult Overlays::findRayIntersectionInternal(const PickR
                                                                      const QVector<OverlayID>& overlaysToInclude,
                                                                      const QVector<OverlayID>& overlaysToDiscard,
                                                                      bool visibleOnly, bool collidableOnly) {
+    QReadLocker lock(&_lock);
     float bestDistance = std::numeric_limits<float>::max();
     bool bestIsFront = false;
 
@@ -713,10 +714,9 @@ PointerEvent Overlays::calculatePointerEvent(Overlay::Pointer overlay, PickRay r
     auto dimensions = thisOverlay->getSize();
 
     glm::vec2 pos2D = projectOntoOverlayXYPlane(position, rotation, dimensions, ray, rayPickResult);
-    PointerEvent pointerEvent(eventType, MOUSE_POINTER_ID,
-        pos2D, rayPickResult.intersection,
-        rayPickResult.surfaceNormal, ray.direction,
-        toPointerButton(*event), toPointerButtons(*event));
+
+    PointerEvent pointerEvent(eventType, MOUSE_POINTER_ID, pos2D, rayPickResult.intersection, rayPickResult.surfaceNormal,
+                              ray.direction, toPointerButton(*event), toPointerButtons(*event), event->modifiers());
 
     return pointerEvent;
 }
