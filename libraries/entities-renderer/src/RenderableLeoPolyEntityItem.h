@@ -79,11 +79,11 @@ public:
     virtual void computeShapeInfo(ShapeInfo& info) override;
 
     virtual bool addToScene(EntityItemPointer self,
-                            std::shared_ptr<render::Scene> scene,
-                            render::PendingChanges& pendingChanges) override;
+                            const render::ScenePointer& scene,
+                            render::Transaction& transaction) override;
     virtual void removeFromScene(EntityItemPointer self,
-                                 std::shared_ptr<render::Scene> scene,
-                                 render::PendingChanges& pendingChanges) override;
+                                 const render::ScenePointer& scene,
+                                 render::Transaction& transaction) override;
 
     virtual void updateRegistrationPoint(const glm::vec3& value) override;
 

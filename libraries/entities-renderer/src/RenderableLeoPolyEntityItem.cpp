@@ -260,8 +260,8 @@ void RenderableLeoPolyEntityItem::render(RenderArgs* args) {
 }
 
 bool RenderableLeoPolyEntityItem::addToScene(EntityItemPointer self,
-                                             std::shared_ptr<render::Scene> scene,
-                                             render::PendingChanges& pendingChanges) {
+                                             const render::ScenePointer& scene,
+                                             render::Transaction& transaction) {
 
     _myItem = scene->allocateID();
 
@@ -273,15 +273,15 @@ bool RenderableLeoPolyEntityItem::addToScene(EntityItemPointer self,
     makeEntityItemStatusGetters(getThisPointer(), statusGetters);
     renderPayload->addStatusGetters(statusGetters);
 
-    pendingChanges.resetItem(_myItem, renderPayload);
+    transaction.resetItem(_myItem, renderPayload);
 
     return true;
 }
 
 void RenderableLeoPolyEntityItem::removeFromScene(EntityItemPointer self,
-                                                  std::shared_ptr<render::Scene> scene,
-                                                  render::PendingChanges& pendingChanges) {
-    pendingChanges.removeItem(_myItem);
+                                                  const render::ScenePointer& scene,
+                                                  render::Transaction& transaction) {
+    transaction.removeItem(_myItem);
     render::Item::clearID(_myItem);
 }
 
